@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use shift_core::{DriveMode, ShiftConfig, SvgMode};
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 
 /// SHIFT — Smart Hybrid Input Filtering & Transformation
 ///
@@ -51,6 +51,9 @@ struct Cli {
     verbose: bool,
 }
 
+/// Maximum stdin input size: 500 MB
+const MAX_STDIN_BYTES: u64 = 500_000_000;
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("shift: error: {:#}", e);
@@ -81,6 +84,7 @@ fn run() -> Result<()> {
         cli.provider.clone()
     };
 
+    // Fix #7: Thread profile_path through ShiftConfig instead of env var
     let config = ShiftConfig {
         mode: drive_mode,
         svg_mode,
@@ -88,12 +92,8 @@ fn run() -> Result<()> {
         model: cli.model,
         dry_run: cli.dry_run,
         verbose: cli.verbose,
+        profile_path: cli.profile,
     };
-
-    // Set custom profile path via env if provided
-    if let Some(ref profile_path) = cli.profile {
-        std::env::set_var("SHIFT_PROFILE", profile_path);
-    }
 
     if cli.verbose {
         eprintln!(
@@ -108,7 +108,6 @@ fn run() -> Result<()> {
     // Output
     match cli.output.as_str() {
         "json" => {
-            // Payload to stdout, report to stderr if verbose
             let json = serde_json::to_string_pretty(&result)?;
             println!("{}", json);
 
@@ -117,11 +116,9 @@ fn run() -> Result<()> {
             }
         }
         "report" => {
-            // Report only (to stdout)
             println!("{}", report);
         }
         "both" => {
-            // Report to stderr, payload to stdout
             eprintln!("{}", report);
             let json = serde_json::to_string_pretty(&result)?;
             println!("{}", json);
@@ -138,14 +135,16 @@ fn read_input(file: &Option<String>) -> Result<String> {
             std::fs::read_to_string(path).with_context(|| format!("failed to read {}", path))
         }
         None => {
-            // Check if stdin has data
-            if atty::is(atty::Stream::Stdin) {
+            // Fix #18: Use std::io::IsTerminal instead of unmaintained `atty`
+            if std::io::stdin().is_terminal() {
                 anyhow::bail!(
                     "no input provided. Usage:\n  shift <file.json>\n  cat request.json | shift"
                 );
             }
+            // Fix #19: Limit stdin read size
             let mut buf = String::new();
             std::io::stdin()
+                .take(MAX_STDIN_BYTES)
                 .read_to_string(&mut buf)
                 .context("failed to read stdin")?;
             Ok(buf)

@@ -14,10 +14,19 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use super::{ExtractedImage, ImageRef};
-use crate::inspector::decode_base64_image;
+use crate::inspector::{decode_base64_image, image::fetch_url_safe};
+use crate::mode::SafetyLimits;
 
 /// Extract all images from an OpenAI-format payload.
 pub fn extract_images(payload: &Value) -> Result<Vec<ExtractedImage>> {
+    extract_images_with_limits(payload, &SafetyLimits::default())
+}
+
+/// Extract images with explicit safety limits.
+pub fn extract_images_with_limits(
+    payload: &Value,
+    limits: &SafetyLimits,
+) -> Result<Vec<ExtractedImage>> {
     let mut images = Vec::new();
     let mut global_index = 0;
 
@@ -38,6 +47,11 @@ pub fn extract_images(payload: &Value) -> Result<Vec<ExtractedImage>> {
                 continue;
             }
 
+            // Fix #8: Cap total images extracted
+            if global_index >= limits.max_images_extract {
+                break;
+            }
+
             let url = part
                 .get("image_url")
                 .and_then(|iu| iu.get("url"))
@@ -47,7 +61,6 @@ pub fn extract_images(payload: &Value) -> Result<Vec<ExtractedImage>> {
             let (data, image_ref) = if url.starts_with("data:") {
                 let (bytes, mime_hint) = decode_base64_image(url)?;
                 let mime = mime_hint.unwrap_or_else(|| "image/png".to_string());
-                // Extract the base64 portion
                 let b64 = url.find(',').map(|pos| &url[pos + 1..]).unwrap_or(url);
                 (
                     bytes,
@@ -57,14 +70,9 @@ pub fn extract_images(payload: &Value) -> Result<Vec<ExtractedImage>> {
                     },
                 )
             } else if url.starts_with("http://") || url.starts_with("https://") {
-                let response = minreq::get(url)
-                    .with_timeout(30)
-                    .send()
-                    .with_context(|| format!("failed to fetch image from {}", url))?;
-                if response.status_code != 200 {
-                    anyhow::bail!("failed to fetch {}: HTTP {}", url, response.status_code);
-                }
-                (response.as_bytes().to_vec(), ImageRef::Url(url.to_string()))
+                // Fix #1, #3: Use safe URL fetcher with SSRF prevention and size limits
+                let bytes = fetch_url_safe(url, limits)?;
+                (bytes, ImageRef::Url(url.to_string()))
             } else {
                 anyhow::bail!(
                     "unsupported image_url format: {}",

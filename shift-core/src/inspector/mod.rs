@@ -4,10 +4,10 @@ pub mod image;
 pub mod audio;
 pub mod document;
 pub mod video;
-// pub mod document;
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::mode::SafetyLimits;
 
 /// Detected format of a media input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,9 +220,20 @@ fn is_svg(data: &[u8]) -> bool {
 /// Handles formats:
 /// - `data:image/png;base64,iVBOR...`
 /// - `iVBOR...` (raw base64)
-pub fn decode_base64_image(input: &str) -> Result<(Vec<u8>, Option<String>)> {
+///
+/// Enforces a size limit (default 30 MB base64 input) to prevent OOM.
+/// Uses a tolerant decoder that accepts both padded and unpadded base64.
+pub fn decode_base64_image(input: &str) -> anyhow::Result<(Vec<u8>, Option<String>)> {
+    decode_base64_image_with_limits(input, &SafetyLimits::default())
+}
+
+/// Decode base64 with explicit safety limits.
+pub fn decode_base64_image_with_limits(
+    input: &str,
+    limits: &SafetyLimits,
+) -> anyhow::Result<(Vec<u8>, Option<String>)> {
+    use base64::engine::general_purpose;
     use base64::Engine;
-    let engine = base64::engine::general_purpose::STANDARD;
 
     let (b64_data, mime_hint) = if let Some(rest) = input.strip_prefix("data:") {
         // data:image/png;base64,iVBOR...
@@ -238,9 +249,25 @@ pub fn decode_base64_image(input: &str) -> Result<(Vec<u8>, Option<String>)> {
         (input, None)
     };
 
+    // Fix #9: Check base64 input size before allocating
+    if b64_data.len() > limits.max_base64_bytes {
+        anyhow::bail!(
+            "base64 input too large: {} bytes exceeds limit of {} bytes",
+            b64_data.len(),
+            limits.max_base64_bytes
+        );
+    }
+
+    // Fix #23: Use tolerant engine that accepts padded and unpadded base64
+    let engine = general_purpose::STANDARD;
+
     // Strip whitespace/newlines from base64
     let cleaned: String = b64_data.chars().filter(|c| !c.is_whitespace()).collect();
-    let bytes = engine.decode(&cleaned)?;
+
+    // Try standard (padded) first, then no-pad
+    let bytes = engine
+        .decode(&cleaned)
+        .or_else(|_| general_purpose::STANDARD_NO_PAD.decode(&cleaned))?;
 
     Ok((bytes, mime_hint))
 }
@@ -363,6 +390,30 @@ mod tests {
         let (bytes, mime) = decode_base64_image(&encoded).unwrap();
         assert_eq!(bytes, raw);
         assert!(mime.is_none());
+    }
+
+    #[test]
+    fn test_decode_base64_size_limit() {
+        let limits = SafetyLimits {
+            max_base64_bytes: 100,
+            ..Default::default()
+        };
+        let big_input = "A".repeat(200);
+        let result = decode_base64_image_with_limits(&big_input, &limits);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("too large"));
+    }
+
+    #[test]
+    fn test_decode_base64_unpadded() {
+        use base64::Engine;
+        let raw = vec![0x89, 0x50, 0x4E, 0x47, 0x0D]; // 5 bytes
+                                                      // Standard encoding would be "iVBORQ==" but no-pad is "iVBORQ"
+        let encoded_nopad = base64::engine::general_purpose::STANDARD_NO_PAD.encode(&raw);
+        assert!(!encoded_nopad.contains('='));
+
+        let (bytes, _) = decode_base64_image(&encoded_nopad).unwrap();
+        assert_eq!(bytes, raw);
     }
 
     #[test]

@@ -192,8 +192,15 @@ fn test_svg_fixture_source_mode() {
 
     assert!(report.has_changes());
     assert!(
-        report.actions.iter().any(|a| a.action == "svg_as_text"),
-        "source mode should produce svg_as_text action"
+        report
+            .actions
+            .iter()
+            .any(|a| a.action == "svg_dropped_as_source"),
+        "source mode should produce svg_dropped_as_source action"
+    );
+    assert!(
+        report.images_dropped > 0,
+        "source mode should count as dropped"
     );
 }
 

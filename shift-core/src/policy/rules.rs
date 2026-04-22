@@ -55,32 +55,19 @@ pub fn evaluate(
         });
     }
 
-    // 3. Dimension checks
-    let needs_resize = check_dimensions(meta, constraints, mode);
-    if let Some((tw, th)) = needs_resize {
+    // 3. Dimension + megapixel checks (unified)
+    // Fix #4: Compute target dimensions that satisfy BOTH constraints simultaneously.
+    let resize_target = compute_resize_target(meta, constraints, mode);
+    if let Some((tw, th)) = resize_target {
         actions.push(Action::Resize {
             target_width: tw,
             target_height: th,
         });
     }
 
-    // 4. Megapixel check (Anthropic)
-    if let Some(max_mp) = constraints.max_image_megapixels {
-        if meta.megapixels > max_mp && needs_resize.is_none() {
-            // Need to resize to fit megapixel limit
-            let scale = (max_mp / meta.megapixels).sqrt();
-            let tw = (meta.width as f64 * scale) as u32;
-            let th = (meta.height as f64 * scale) as u32;
-            actions.push(Action::Resize {
-                target_width: tw,
-                target_height: th,
-            });
-        }
-    }
-
-    // 5. File size check
-    if meta.size_bytes > constraints.max_image_size_bytes {
-        // Try recompression first (if JPEG)
+    // 4. File size check
+    // Fix #6: Only recompress JPEG. For other formats, we rely on resize to reduce size.
+    if meta.size_bytes > constraints.max_image_size_bytes && meta.format == MediaFormat::Jpeg {
         let quality = match mode {
             DriveMode::Performance => 90,
             DriveMode::Balanced => 80,
@@ -89,7 +76,7 @@ pub fn evaluate(
         actions.push(Action::Recompress { quality });
     }
 
-    // 6. Economy mode: drop excess images
+    // 5. Economy mode: drop excess images
     if mode == DriveMode::Economy
         && total_images > constraints.max_images
         && image_index >= constraints.max_images
@@ -104,15 +91,13 @@ pub fn evaluate(
         });
     }
 
-    // 7. Mode-based aggressive resizing (economy)
-    if mode == DriveMode::Economy
-        && actions.iter().all(|a| matches!(a, Action::Pass))
-        && meta.max_dim() > 1024
-    {
+    // 6. Mode-based aggressive resizing (economy)
+    // Fix #22: Use `actions.is_empty()` instead of vacuous truth `.all(Pass)`.
+    if mode == DriveMode::Economy && actions.is_empty() && meta.max_dim() > 1024 {
         // In economy mode, aggressively downscale even if within limits
         let scale = 1024.0 / meta.max_dim() as f64;
-        let tw = (meta.width as f64 * scale) as u32;
-        let th = (meta.height as f64 * scale) as u32;
+        let tw = (meta.width as f64 * scale).max(1.0) as u32;
+        let th = (meta.height as f64 * scale).max(1.0) as u32;
         actions.push(Action::Resize {
             target_width: tw,
             target_height: th,
@@ -127,8 +112,12 @@ pub fn evaluate(
     actions
 }
 
-/// Determine resize dimensions based on constraints and mode.
-fn check_dimensions(
+/// Compute resize target that satisfies BOTH dimension AND megapixel constraints.
+///
+/// Fix #4: Previously, dimension resize was computed independently and if it fired,
+/// the megapixel check was skipped. Now we compute the most conservative (smallest)
+/// target that satisfies both constraints simultaneously.
+fn compute_resize_target(
     meta: &ImageMetadata,
     constraints: &ModelConstraints,
     mode: DriveMode,
@@ -139,11 +128,31 @@ fn check_dimensions(
         DriveMode::Economy => constraints.max_image_dim.min(1024),
     };
 
+    // Start with a scale of 1.0 (no resize)
+    let mut scale = 1.0_f64;
+    let mut needs_resize = false;
+
+    // Dimension constraint
     if meta.max_dim() > max_dim {
-        let scale = max_dim as f64 / meta.max_dim() as f64;
-        let tw = (meta.width as f64 * scale) as u32;
-        let th = (meta.height as f64 * scale) as u32;
-        Some((tw.max(1), th.max(1)))
+        let dim_scale = max_dim as f64 / meta.max_dim() as f64;
+        scale = scale.min(dim_scale);
+        needs_resize = true;
+    }
+
+    // Megapixel constraint
+    if let Some(max_mp) = constraints.max_image_megapixels {
+        if meta.megapixels > max_mp {
+            let mp_scale = (max_mp / meta.megapixels).sqrt();
+            scale = scale.min(mp_scale);
+            needs_resize = true;
+        }
+    }
+
+    if needs_resize {
+        // Fix #21: Ensure dimensions are at least 1
+        let tw = (meta.width as f64 * scale).max(1.0) as u32;
+        let th = (meta.height as f64 * scale).max(1.0) as u32;
+        Some((tw, th))
     } else {
         None
     }
@@ -307,13 +316,26 @@ mod tests {
     }
 
     #[test]
-    fn test_oversized_file_recompressed() {
-        // 25 MB file, over 20 MB limit
+    fn test_oversized_jpeg_recompressed() {
+        // 25 MB JPEG file, over 20 MB limit — JPEG should get recompressed
         let meta = make_meta(MediaFormat::Jpeg, 1000, 800, 25_000_000);
         let actions = evaluate(&meta, &make_constraints(), DriveMode::Balanced, 0, 1);
         assert!(actions
             .iter()
             .any(|a| matches!(a, Action::Recompress { quality: 80 })));
+    }
+
+    #[test]
+    fn test_oversized_png_not_recompressed() {
+        // Fix #6: 25 MB PNG should NOT get Recompress (which would lossy-convert to JPEG)
+        let meta = make_meta(MediaFormat::Png, 1000, 800, 25_000_000);
+        let actions = evaluate(&meta, &make_constraints(), DriveMode::Balanced, 0, 1);
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Recompress { .. })),
+            "PNG should not get JPEG recompress action"
+        );
     }
 
     #[test]
@@ -330,5 +352,36 @@ mod tests {
         assert!(eco_actions
             .iter()
             .any(|a| matches!(a, Action::Recompress { quality: 60 })));
+    }
+
+    // Fix #4: Megapixel + dimension interaction
+    #[test]
+    fn test_dimension_and_megapixel_both_enforced() {
+        // 10000x10000: exceeds both max_dim (8000) and megapixels (1.15)
+        // Should resize to satisfy BOTH — not just dimension
+        let meta = make_meta(MediaFormat::Png, 10000, 10000, 100_000);
+        let actions = evaluate(
+            &meta,
+            &make_anthropic_constraints(),
+            DriveMode::Balanced,
+            0,
+            1,
+        );
+        assert!(actions.iter().any(|a| matches!(a, Action::Resize { .. })));
+        if let Action::Resize {
+            target_width,
+            target_height,
+        } = &actions[0]
+        {
+            // Post-resize should be under BOTH limits
+            let post_mp = (*target_width as f64 * *target_height as f64) / 1_000_000.0;
+            assert!(
+                post_mp <= 1.15,
+                "post-resize megapixels {} exceeds 1.15",
+                post_mp
+            );
+            assert!(*target_width <= 8000);
+            assert!(*target_height <= 8000);
+        }
     }
 }

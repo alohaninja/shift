@@ -26,11 +26,21 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use super::{ExtractedImage, ImageRef};
+use crate::inspector::image::fetch_url_safe;
+use crate::mode::SafetyLimits;
 
 /// Extract all images from an Anthropic-format payload.
 pub fn extract_images(payload: &Value) -> Result<Vec<ExtractedImage>> {
+    extract_images_with_limits(payload, &SafetyLimits::default())
+}
+
+/// Extract images with explicit safety limits.
+pub fn extract_images_with_limits(
+    payload: &Value,
+    limits: &SafetyLimits,
+) -> Result<Vec<ExtractedImage>> {
+    use base64::engine::general_purpose;
     use base64::Engine;
-    let engine = base64::engine::general_purpose::STANDARD;
 
     let mut images = Vec::new();
     let mut global_index = 0;
@@ -50,6 +60,11 @@ pub fn extract_images(payload: &Value) -> Result<Vec<ExtractedImage>> {
             let part_type = part.get("type").and_then(|t| t.as_str()).unwrap_or("");
             if part_type != "image" {
                 continue;
+            }
+
+            // Fix #8: Cap total images extracted
+            if global_index >= limits.max_images_extract {
+                break;
             }
 
             let source = part
@@ -72,8 +87,18 @@ pub fn extract_images(payload: &Value) -> Result<Vec<ExtractedImage>> {
                         .and_then(|d| d.as_str())
                         .context("base64 source missing 'data'")?;
 
-                    let bytes = engine
+                    // Fix #9: Check base64 size before decoding
+                    if b64_data.len() > limits.max_base64_bytes {
+                        anyhow::bail!(
+                            "base64 image data too large: {} bytes exceeds limit",
+                            b64_data.len()
+                        );
+                    }
+
+                    // Fix #23: Try padded then unpadded
+                    let bytes = general_purpose::STANDARD
                         .decode(b64_data)
+                        .or_else(|_| general_purpose::STANDARD_NO_PAD.decode(b64_data))
                         .context("failed to decode base64 image data")?;
 
                     (
@@ -90,15 +115,9 @@ pub fn extract_images(payload: &Value) -> Result<Vec<ExtractedImage>> {
                         .and_then(|u| u.as_str())
                         .context("url source missing 'url'")?;
 
-                    let response = minreq::get(url)
-                        .with_timeout(30)
-                        .send()
-                        .with_context(|| format!("failed to fetch image from {}", url))?;
-                    if response.status_code != 200 {
-                        anyhow::bail!("failed to fetch {}: HTTP {}", url, response.status_code);
-                    }
-
-                    (response.as_bytes().to_vec(), ImageRef::Url(url.to_string()))
+                    // Fix #1, #3: Use safe URL fetcher
+                    let bytes = fetch_url_safe(url, limits)?;
+                    (bytes, ImageRef::Url(url.to_string()))
                 }
                 other => {
                     anyhow::bail!("unsupported Anthropic source type: {}", other);

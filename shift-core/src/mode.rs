@@ -82,6 +82,37 @@ impl FromStr for SvgMode {
     }
 }
 
+/// Safety limits for untrusted input processing.
+pub struct SafetyLimits {
+    /// Maximum pixels (width * height) before rejecting an image decode.
+    /// Default: 100 megapixels (100_000_000).
+    pub max_pixels: u64,
+    /// Maximum base64 input length in bytes before rejecting.
+    /// Default: 30 MB (30_000_000). Decoded size is ~75% of this.
+    pub max_base64_bytes: usize,
+    /// Maximum HTTP response body size in bytes.
+    /// Default: 25 MB (25_000_000).
+    pub max_download_bytes: usize,
+    /// Maximum images to extract from a single payload.
+    /// Default: 50. Prevents OOM from payloads with hundreds of images.
+    pub max_images_extract: usize,
+    /// Maximum stdin input size in bytes.
+    /// Default: 500 MB (500_000_000).
+    pub max_stdin_bytes: u64,
+}
+
+impl Default for SafetyLimits {
+    fn default() -> Self {
+        SafetyLimits {
+            max_pixels: 100_000_000,
+            max_base64_bytes: 30_000_000,
+            max_download_bytes: 25_000_000,
+            max_images_extract: 50,
+            max_stdin_bytes: 500_000_000,
+        }
+    }
+}
+
 /// Configuration bundle for a single SHIFT processing run.
 #[derive(Debug, Clone)]
 pub struct ShiftConfig {
@@ -91,6 +122,9 @@ pub struct ShiftConfig {
     pub model: Option<String>,
     pub dry_run: bool,
     pub verbose: bool,
+    /// Optional path to a custom provider profile JSON file.
+    /// Replaces the old SHIFT_PROFILE env var pattern.
+    pub profile_path: Option<String>,
 }
 
 impl Default for ShiftConfig {
@@ -102,6 +136,7 @@ impl Default for ShiftConfig {
             model: None,
             dry_run: false,
             verbose: false,
+            profile_path: None,
         }
     }
 }
@@ -152,5 +187,15 @@ mod tests {
         assert!(cfg.model.is_none());
         assert!(!cfg.dry_run);
         assert!(!cfg.verbose);
+        assert!(cfg.profile_path.is_none());
+    }
+
+    #[test]
+    fn test_default_safety_limits() {
+        let limits = SafetyLimits::default();
+        assert_eq!(limits.max_pixels, 100_000_000);
+        assert_eq!(limits.max_base64_bytes, 30_000_000);
+        assert_eq!(limits.max_download_bytes, 25_000_000);
+        assert_eq!(limits.max_images_extract, 50);
     }
 }

@@ -38,9 +38,30 @@ pub fn transform_image(data: &[u8], action: &Action) -> Result<Vec<u8>> {
     }
 }
 
+/// Load an image from memory with a pixel budget to prevent decompression bombs.
+fn load_image_safe(data: &[u8]) -> Result<DynamicImage> {
+    // Fix #2: Read dimensions first (cheap header-only read), then enforce pixel budget
+    let reader = image::ImageReader::new(std::io::Cursor::new(data))
+        .with_guessed_format()
+        .context("failed to guess image format")?;
+
+    if let Ok((w, h)) = reader.into_dimensions() {
+        let pixels = w as u64 * h as u64;
+        if pixels > 100_000_000 {
+            anyhow::bail!(
+                "image decompression blocked: {}x{} ({:.0} megapixels) exceeds 100 megapixel safety limit",
+                w, h, pixels as f64 / 1_000_000.0
+            );
+        }
+    }
+
+    // Now do the full decode — we know it's within pixel budget
+    image::load_from_memory(data).context("failed to decode image")
+}
+
 /// Resize an image to fit within target dimensions, preserving aspect ratio.
 fn resize_image(data: &[u8], target_width: u32, target_height: u32) -> Result<Vec<u8>> {
-    let img = image::load_from_memory(data).context("failed to decode image for resizing")?;
+    let img = load_image_safe(data)?;
 
     let resized = img.resize(target_width, target_height, FilterType::Lanczos3);
 
@@ -50,7 +71,7 @@ fn resize_image(data: &[u8], target_width: u32, target_height: u32) -> Result<Ve
 
 /// Recompress an image as JPEG at the given quality.
 fn recompress_jpeg(data: &[u8], quality: u8) -> Result<Vec<u8>> {
-    let img = image::load_from_memory(data).context("failed to decode image for recompression")?;
+    let img = load_image_safe(data)?;
 
     let rgb = img.to_rgb8();
     let mut buf = Vec::new();
@@ -69,7 +90,7 @@ fn recompress_jpeg(data: &[u8], quality: u8) -> Result<Vec<u8>> {
 
 /// Convert an image to a different format.
 fn convert_format(data: &[u8], to: &str) -> Result<Vec<u8>> {
-    let img = image::load_from_memory(data).context("failed to decode image for conversion")?;
+    let img = load_image_safe(data)?;
 
     match to {
         "png" => encode_png(&img),
@@ -125,6 +146,16 @@ pub fn rasterize_svg(svg_text: &str, target_width: u32, target_height: u32) -> R
 
     let pixel_w = (svg_w * scale).ceil() as u32;
     let pixel_h = (svg_h * scale).ceil() as u32;
+
+    // Fix #2: Pixel budget for SVG rasterization
+    let pixel_count = pixel_w as u64 * pixel_h as u64;
+    if pixel_count > 100_000_000 {
+        anyhow::bail!(
+            "SVG rasterization blocked: {}x{} exceeds 100 megapixel safety limit",
+            pixel_w,
+            pixel_h
+        );
+    }
 
     let mut pixmap = tiny_skia::Pixmap::new(pixel_w.max(1), pixel_h.max(1))
         .context("failed to create pixmap")?;

@@ -21,9 +21,13 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
     // Detect provider format if not specified
     let provider_format = payload::detect_provider(payload);
 
-    // Load provider profile
-    let profile = if let Ok(custom_path) = std::env::var("SHIFT_PROFILE") {
-        policy::load_from_file(&custom_path)?
+    // Fix #7: Load provider profile from config, not env var
+    let profile = if let Some(ref custom_path) = config.profile_path {
+        // Fix #11: Validate the profile path
+        if custom_path.contains("..") {
+            anyhow::bail!("profile path must not contain '..' path traversal");
+        }
+        policy::load_from_file(custom_path)?
     } else {
         policy::load_builtin(&config.provider)?
     };
@@ -50,15 +54,31 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
     }
 
     report.images_found = images.len();
-    report.original_size = payload.to_string().len();
+    // Fix #16: Track image byte sizes separately from JSON serialization
+    let original_image_bytes: usize = images.iter().map(|img| img.data.len()).sum();
+    report.original_size = original_image_bytes;
 
     let total_images = images.len();
     let mut transformed_images: Vec<(usize, Vec<u8>, String)> = Vec::new();
 
     for extracted in &images {
-        // Inspect the image
-        let meta = inspector::image::inspect_bytes(&extracted.data)
-            .with_context(|| format!("failed to inspect image {}", extracted.global_index))?;
+        // Fix #15: Inspect with skip-and-warn on individual failures
+        let meta = match inspector::image::inspect_bytes(&extracted.data) {
+            Ok(m) => m,
+            Err(e) => {
+                report.add_warning(&format!(
+                    "image {}: skipped ({})",
+                    extracted.global_index, e
+                ));
+                // Push original data through unchanged
+                transformed_images.push((
+                    extracted.global_index,
+                    extracted.data.clone(),
+                    "image/png".to_string(),
+                ));
+                continue;
+            }
+        };
 
         // Evaluate policy
         let actions = policy::evaluate(
@@ -150,7 +170,12 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
         }
     };
 
-    report.transformed_size = result.to_string().len();
+    // Fix #16: Track transformed image byte sizes
+    let transformed_image_bytes: usize = transformed_images
+        .iter()
+        .map(|(_, data, _)| data.len())
+        .sum();
+    report.transformed_size = transformed_image_bytes;
 
     Ok((result, report))
 }
@@ -204,17 +229,22 @@ fn handle_svg(
         }
 
         SvgMode::Source => {
-            // Pass SVG as text — the caller should replace the image block with a text block
-            // For now, we convert to a text representation
+            // Fix #5: SVG Source mode drops the image and records it as dropped.
+            // The image block is removed from the payload. In the future, we could
+            // inject the SVG XML as a text content block, but for now we drop + warn.
             report.add_action(
                 global_index,
-                "svg_as_text",
-                &format!("SVG ({}x{}) passed as source text", meta.width, meta.height),
+                "svg_dropped_as_source",
+                &format!(
+                    "SVG ({}x{}) removed (source mode: SVG not supported by provider)",
+                    meta.width, meta.height
+                ),
             );
-            report.images_modified += 1;
+            report.images_dropped += 1;
+            report.add_warning(
+                "SVG source mode dropped an image. Consider --svg-mode raster for provider compatibility.",
+            );
 
-            // Return empty to signal the image should be replaced with text
-            // The source text is available in meta.svg_source
             Ok((global_index, Vec::new(), "text/plain".to_string()))
         }
 

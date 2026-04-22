@@ -31,6 +31,6 @@ pub mod policy;
 pub mod report;
 pub mod transformer;
 
-pub use mode::{DriveMode, ShiftConfig, SvgMode};
+pub use mode::{DriveMode, SafetyLimits, ShiftConfig, SvgMode};
 pub use pipeline::process;
 pub use report::Report;
