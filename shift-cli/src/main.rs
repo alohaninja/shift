@@ -93,6 +93,7 @@ fn run() -> Result<()> {
         dry_run: cli.dry_run,
         verbose: cli.verbose,
         profile_path: cli.profile,
+        limits: shift_core::SafetyLimits::default(),
     };
 
     if cli.verbose {

@@ -83,6 +83,7 @@ impl FromStr for SvgMode {
 }
 
 /// Safety limits for untrusted input processing.
+#[derive(Debug, Clone)]
 pub struct SafetyLimits {
     /// Maximum pixels (width * height) before rejecting an image decode.
     /// Default: 100 megapixels (100_000_000).
@@ -123,8 +124,10 @@ pub struct ShiftConfig {
     pub dry_run: bool,
     pub verbose: bool,
     /// Optional path to a custom provider profile JSON file.
-    /// Replaces the old SHIFT_PROFILE env var pattern.
     pub profile_path: Option<String>,
+    /// Safety limits for untrusted input processing.
+    /// R8: Now wired through the pipeline to extraction functions.
+    pub limits: SafetyLimits,
 }
 
 impl Default for ShiftConfig {
@@ -137,6 +140,7 @@ impl Default for ShiftConfig {
             dry_run: false,
             verbose: false,
             profile_path: None,
+            limits: SafetyLimits::default(),
         }
     }
 }
@@ -188,6 +192,7 @@ mod tests {
         assert!(!cfg.dry_run);
         assert!(!cfg.verbose);
         assert!(cfg.profile_path.is_none());
+        assert_eq!(cfg.limits.max_pixels, 100_000_000);
     }
 
     #[test]

@@ -23,11 +23,37 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
 
     // Fix #7: Load provider profile from config, not env var
     let profile = if let Some(ref custom_path) = config.profile_path {
-        // Fix #11: Validate the profile path
-        if custom_path.contains("..") {
-            anyhow::bail!("profile path must not contain '..' path traversal");
+        // R7: Validate the profile path more thoroughly
+        let path = std::path::Path::new(custom_path);
+
+        // Must have a .json extension
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("json") => {}
+            _ => anyhow::bail!("profile path must have a .json extension"),
         }
-        policy::load_from_file(custom_path)?
+
+        // Reject path traversal components
+        for component in path.components() {
+            if matches!(component, std::path::Component::ParentDir) {
+                anyhow::bail!("profile path must not contain '..' path traversal");
+            }
+        }
+
+        // Canonicalize to resolve symlinks, then verify the canonical path
+        // ends with .json (symlink to /etc/passwd would fail this)
+        if path.exists() {
+            let canonical = std::fs::canonicalize(path)
+                .with_context(|| "failed to resolve profile path".to_string())?;
+            match canonical.extension().and_then(|e| e.to_str()) {
+                Some("json") => {}
+                _ => anyhow::bail!(
+                    "profile path resolves to a non-JSON file (possible symlink attack)"
+                ),
+            }
+            policy::load_from_file(canonical.to_str().unwrap_or(custom_path))?
+        } else {
+            policy::load_from_file(custom_path)?
+        }
     } else {
         policy::load_builtin(&config.provider)?
     };
@@ -39,10 +65,12 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
         .or_else(|| payload.get("model").and_then(|m| m.as_str()));
     let constraints = profile.constraints_for(model_name);
 
-    // Extract images based on detected format
+    // R8: Extract images with configured safety limits
     let images = match provider_format {
-        Some("openai") => payload::openai::extract_images(payload)?,
-        Some("anthropic") => payload::anthropic::extract_images(payload)?,
+        Some("openai") => payload::openai::extract_images_with_limits(payload, &config.limits)?,
+        Some("anthropic") => {
+            payload::anthropic::extract_images_with_limits(payload, &config.limits)?
+        }
         _ => {
             // No images found or text-only payload — pass through
             return Ok((payload.clone(), report));
@@ -70,11 +98,18 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
                     "image {}: skipped ({})",
                     extracted.global_index, e
                 ));
+                // R6: Use the original MIME type from the image reference,
+                // not a hardcoded "image/png" which would mislabel JPEG/WebP/GIF.
+                let original_mime = match &extracted.original_ref {
+                    payload::ImageRef::DataUri { mime_type, .. } => mime_type.clone(),
+                    payload::ImageRef::Base64 { media_type, .. } => media_type.clone(),
+                    payload::ImageRef::Url(_) => "application/octet-stream".to_string(),
+                };
                 // Push original data through unchanged
                 transformed_images.push((
                     extracted.global_index,
                     extracted.data.clone(),
-                    "image/png".to_string(),
+                    original_mime,
                 ));
                 continue;
             }

@@ -39,20 +39,33 @@ pub fn transform_image(data: &[u8], action: &Action) -> Result<Vec<u8>> {
 }
 
 /// Load an image from memory with a pixel budget to prevent decompression bombs.
+///
+/// R5: Propagates dimension-read errors instead of silently falling through
+/// to an unguarded decode. If we can't read dimensions from the header,
+/// we reject the image rather than risk a decompression bomb.
 fn load_image_safe(data: &[u8]) -> Result<DynamicImage> {
-    // Fix #2: Read dimensions first (cheap header-only read), then enforce pixel budget
+    use crate::mode::SafetyLimits;
+
+    let limits = SafetyLimits::default();
+
     let reader = image::ImageReader::new(std::io::Cursor::new(data))
         .with_guessed_format()
         .context("failed to guess image format")?;
 
-    if let Ok((w, h)) = reader.into_dimensions() {
-        let pixels = w as u64 * h as u64;
-        if pixels > 100_000_000 {
-            anyhow::bail!(
-                "image decompression blocked: {}x{} ({:.0} megapixels) exceeds 100 megapixel safety limit",
-                w, h, pixels as f64 / 1_000_000.0
-            );
-        }
+    // R5: Propagate the error — don't silently skip the budget check
+    let (w, h) = reader
+        .into_dimensions()
+        .context("failed to read image dimensions (cannot verify pixel budget)")?;
+
+    let pixels = w as u64 * h as u64;
+    if pixels > limits.max_pixels {
+        anyhow::bail!(
+            "image decompression blocked: {}x{} ({:.0} megapixels) exceeds {:.0} megapixel safety limit",
+            w,
+            h,
+            pixels as f64 / 1_000_000.0,
+            limits.max_pixels as f64 / 1_000_000.0
+        );
     }
 
     // Now do the full decode — we know it's within pixel budget
@@ -147,13 +160,15 @@ pub fn rasterize_svg(svg_text: &str, target_width: u32, target_height: u32) -> R
     let pixel_w = (svg_w * scale).ceil() as u32;
     let pixel_h = (svg_h * scale).ceil() as u32;
 
-    // Fix #2: Pixel budget for SVG rasterization
+    // R9: Pixel budget for SVG rasterization (shared via SafetyLimits)
+    let limits = crate::mode::SafetyLimits::default();
     let pixel_count = pixel_w as u64 * pixel_h as u64;
-    if pixel_count > 100_000_000 {
+    if pixel_count > limits.max_pixels {
         anyhow::bail!(
-            "SVG rasterization blocked: {}x{} exceeds 100 megapixel safety limit",
+            "SVG rasterization blocked: {}x{} exceeds {:.0} megapixel safety limit",
             pixel_w,
-            pixel_h
+            pixel_h,
+            limits.max_pixels as f64 / 1_000_000.0
         );
     }
 
