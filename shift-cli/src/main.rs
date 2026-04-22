@@ -30,8 +30,12 @@ struct Cli {
     #[arg(long, default_value = "raster", value_parser = ["raster", "source", "hybrid"])]
     svg_mode: String,
 
-    /// Output format (json = transformed payload, report = transformation report)
-    #[arg(short, long, default_value = "json", value_parser = ["json", "report", "both"])]
+    /// Output format
+    ///   json        = transformed payload (default)
+    ///   report      = human-readable transformation report
+    ///   json-report = machine-readable report as JSON (for dashboards)
+    ///   both        = report to stderr + payload to stdout
+    #[arg(short, long, default_value = "json", value_parser = ["json", "report", "json-report", "both"])]
     output: String,
 
     /// Show what would change without modifying
@@ -118,6 +122,10 @@ fn run() -> Result<()> {
         }
         "report" => {
             println!("{}", report);
+        }
+        "json-report" => {
+            let json = serde_json::to_string_pretty(&report)?;
+            println!("{}", json);
         }
         "both" => {
             eprintln!("{}", report);

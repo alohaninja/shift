@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
 
+use crate::cost::{estimate_tokens, ImageMetrics};
 use crate::inspector;
 use crate::inspector::MediaFormat;
 use crate::mode::{ShiftConfig, SvgMode};
@@ -115,6 +116,12 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
             }
         };
 
+        // Capture original dimensions for token estimation
+        let orig_w = meta.width;
+        let orig_h = meta.height;
+        let orig_bytes = extracted.data.len();
+        let format_before = meta.format.to_string();
+
         // Evaluate policy
         let actions = policy::evaluate(
             &meta,
@@ -134,6 +141,31 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
                 extracted.global_index,
                 &mut report,
             )?;
+
+            // Record metrics for SVG
+            let (_, ref out_data, ref out_mime) = result;
+            let (tw, th) = if out_data.is_empty() {
+                (0, 0)
+            } else {
+                inspector::image::inspect_bytes(out_data)
+                    .map(|m| (m.width, m.height))
+                    .unwrap_or((orig_w, orig_h))
+            };
+            let format_after = mime_to_short(out_mime);
+            report.add_image_metrics(ImageMetrics {
+                image_index: extracted.global_index,
+                original_width: orig_w,
+                original_height: orig_h,
+                transformed_width: tw,
+                transformed_height: th,
+                original_bytes: orig_bytes,
+                transformed_bytes: out_data.len(),
+                format_before: format_before.clone(),
+                format_after,
+                tokens_before: estimate_tokens(orig_w, orig_h),
+                tokens_after: estimate_tokens(tw, th),
+            });
+
             transformed_images.push(result);
             continue;
         }
@@ -142,6 +174,7 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
         let mut current_data = extracted.data.clone();
         let mut was_modified = false;
         let mut output_mime = meta.format.mime_type().to_string();
+        let mut was_dropped = false;
 
         for action in &actions {
             match action {
@@ -151,6 +184,7 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
                     report.images_dropped += 1;
                     current_data = Vec::new();
                     was_modified = true;
+                    was_dropped = true;
                     break;
                 }
                 _ => {
@@ -191,6 +225,34 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
             report.images_modified += 1;
         }
 
+        // Determine transformed dimensions
+        let (tw, th) = if was_dropped || current_data.is_empty() {
+            (0, 0)
+        } else if was_modified && !config.dry_run {
+            // Re-inspect transformed data to get actual dimensions
+            inspector::image::inspect_bytes(&current_data)
+                .map(|m| (m.width, m.height))
+                .unwrap_or((orig_w, orig_h))
+        } else {
+            // Dry-run or unchanged: estimate from policy actions
+            estimate_dims_from_actions(&actions, orig_w, orig_h)
+        };
+
+        let format_after = mime_to_short(&output_mime);
+        report.add_image_metrics(ImageMetrics {
+            image_index: extracted.global_index,
+            original_width: orig_w,
+            original_height: orig_h,
+            transformed_width: tw,
+            transformed_height: th,
+            original_bytes: orig_bytes,
+            transformed_bytes: current_data.len(),
+            format_before,
+            format_after,
+            tokens_before: estimate_tokens(orig_w, orig_h),
+            tokens_after: estimate_tokens(tw, th),
+        });
+
         transformed_images.push((extracted.global_index, current_data, output_mime));
     }
 
@@ -212,7 +274,34 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
         .sum();
     report.transformed_size = transformed_image_bytes;
 
+    // Finalize aggregate token savings from per-image metrics
+    report.finalize_token_savings();
+
     Ok((result, report))
+}
+
+/// Extract a short format name from a MIME type (e.g. "image/png" -> "png").
+fn mime_to_short(mime: &str) -> String {
+    mime.strip_prefix("image/").unwrap_or(mime).to_string()
+}
+
+/// Estimate target dimensions from policy actions (for dry-run reporting).
+fn estimate_dims_from_actions(actions: &[policy::Action], orig_w: u32, orig_h: u32) -> (u32, u32) {
+    for action in actions {
+        match action {
+            policy::Action::Resize {
+                target_width,
+                target_height,
+            } => return (*target_width, *target_height),
+            policy::Action::RasterizeSvg {
+                target_width,
+                target_height,
+            } => return (*target_width, *target_height),
+            policy::Action::Drop { .. } => return (0, 0),
+            _ => {}
+        }
+    }
+    (orig_w, orig_h)
 }
 
 /// Handle SVG images according to the configured SvgMode.
