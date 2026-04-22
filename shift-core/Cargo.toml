@@ -12,7 +12,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 resvg = "0.44"
 base64 = "0.22"
 anyhow = "1"
-minreq = { version = "2", features = ["https"] }
+ureq = "3"
 url = "2"
 
 [dev-dependencies]

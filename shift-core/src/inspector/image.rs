@@ -102,7 +102,7 @@ fn validate_url(input: &str) -> Result<()> {
                 }
             }
             // If DNS resolution fails, we allow the request to proceed —
-            // minreq will fail with a connection error. This avoids blocking
+            // ureq will fail with a connection error. This avoids blocking
             // on DNS unavailability.
         }
         None => {
@@ -295,35 +295,41 @@ fn extract_svg_viewbox(svg: &str) -> Option<(u32, u32)> {
 /// Used by payload extractors. Returns the raw bytes.
 ///
 /// R2: Redirects are disabled to prevent SSRF bypass via 302 to private IPs.
-/// R4: Content-Length header is checked before reading the body where available.
+/// R4: Body size enforced during streaming read, not post-hoc.
 pub fn fetch_url_safe(url: &str, limits: &SafetyLimits) -> Result<Vec<u8>> {
     validate_url(url)?;
 
     // R2: Disable redirects entirely. A 302 to a private IP would bypass
     // validate_url() since it only checks the initial URL.
-    let response = minreq::get(url)
-        .with_timeout(30)
-        .with_max_redirects(0)
-        .send()
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .redirect_auth_headers(ureq::config::RedirectAuthHeaders::Never)
+            .max_redirects(0)
+            .timeout_global(Some(std::time::Duration::from_secs(30)))
+            .build(),
+    );
+
+    let response = agent
+        .get(url)
+        .call()
         .with_context(|| "failed to fetch image from URL".to_string())?;
 
-    // Reject redirects explicitly with a clear message
-    if (300..400).contains(&response.status_code) {
+    let status = response.status().as_u16();
+
+    if (300..400).contains(&status) {
         anyhow::bail!(
             "image URL returned a redirect (HTTP {}); redirects are disabled for security",
-            response.status_code
+            status
         );
     }
 
-    if response.status_code != 200 {
-        anyhow::bail!("failed to fetch image: HTTP {}", response.status_code);
+    if status != 200 {
+        anyhow::bail!("failed to fetch image: HTTP {}", status);
     }
 
-    // R4: Check Content-Length header before accessing the body.
-    // minreq buffers the full body on `.send()`, so this is defense-in-depth
-    // for cases where Content-Length is declared honestly.
-    if let Some(cl) = response.headers.get("content-length") {
-        if let Ok(size) = cl.parse::<usize>() {
+    // R4: Check Content-Length header before reading the body.
+    if let Some(cl) = response.headers().get("content-length") {
+        if let Ok(size) = cl.to_str().unwrap_or("").parse::<usize>() {
             if size > limits.max_download_bytes {
                 anyhow::bail!(
                     "image URL Content-Length ({} bytes) exceeds limit of {} bytes",
@@ -334,16 +340,27 @@ pub fn fetch_url_safe(url: &str, limits: &SafetyLimits) -> Result<Vec<u8>> {
         }
     }
 
-    let bytes = response.as_bytes();
-    if bytes.len() > limits.max_download_bytes {
+    // R4: Stream the body with a size cap — prevents OOM from huge responses
+    // even when Content-Length is absent or dishonest.
+    use std::io::Read;
+    let max = limits.max_download_bytes;
+    let mut body = response.into_body();
+    let mut buf = Vec::new();
+    let bytes_read = body
+        .as_reader()
+        .take((max + 1) as u64)
+        .read_to_end(&mut buf)
+        .context("failed to read image response body")?;
+
+    if bytes_read > max {
         anyhow::bail!(
-            "downloaded image too large: {} bytes exceeds limit of {} bytes",
-            bytes.len(),
-            limits.max_download_bytes
+            "downloaded image too large: read at least {} bytes, exceeds limit of {} bytes",
+            bytes_read,
+            max
         );
     }
 
-    Ok(bytes.to_vec())
+    Ok(buf)
 }
 
 #[cfg(test)]
