@@ -1,0 +1,41 @@
+{
+  "name": "openai",
+  "models": {
+    "gpt-4o": {
+      "max_images": 10,
+      "max_image_dim": 2048,
+      "max_image_size_bytes": 20971520,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    },
+    "gpt-4o-mini": {
+      "max_images": 10,
+      "max_image_dim": 2048,
+      "max_image_size_bytes": 20971520,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    },
+    "gpt-4.1": {
+      "max_images": 10,
+      "max_image_dim": 2048,
+      "max_image_size_bytes": 20971520,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    },
+    "gpt-4.1-mini": {
+      "max_images": 10,
+      "max_image_dim": 2048,
+      "max_image_size_bytes": 20971520,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    },
+    "gpt-4.1-nano": {
+      "max_images": 10,
+      "max_image_dim": 2048,
+      "max_image_size_bytes": 20971520,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    }
+  },
+  "default": {
+    "max_images": 10,
+    "max_image_dim": 2048,
+    "max_image_size_bytes": 20971520,
+    "supported_formats": ["png", "jpeg", "gif", "webp"]
+  }
+}

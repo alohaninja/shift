@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
+  <rect width="800" height="600" fill="#2a2a3e"/>
+  <circle cx="400" cy="300" r="150" fill="#4a9eff" opacity="0.8"/>
+  <text x="400" y="310" text-anchor="middle" font-size="32" fill="white">SHIFT</text>
+</svg>

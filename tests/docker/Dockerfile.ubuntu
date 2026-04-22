@@ -1,0 +1,38 @@
+# Ubuntu 22.04 test environment for SHIFT
+FROM ubuntu:22.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install minimal build dependencies
+# minreq uses rustls (pure Rust), so no libssl-dev needed
+RUN apt-get update && apt-get install -y \
+    sudo \
+    curl \
+    ca-certificates \
+    build-essential \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user for testing
+RUN useradd -m -s /bin/bash testuser && \
+    echo "testuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Switch to test user
+USER testuser
+WORKDIR /home/testuser
+
+# Install Rust via rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+
+# Set up environment
+ENV HOME=/home/testuser
+ENV PATH=/home/testuser/.cargo/bin:$PATH
+
+# Copy the repository
+COPY --chown=testuser:testuser . /home/testuser/shift
+
+WORKDIR /home/testuser/shift
+
+# Run the test script
+CMD ["bash", "tests/test-distro.sh"]
