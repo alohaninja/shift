@@ -1,0 +1,33 @@
+# Arch Linux test environment for SHIFT
+FROM archlinux:latest
+
+# Install base development tools
+RUN pacman -Syu --noconfirm && \
+    pacman -S --noconfirm \
+    sudo \
+    curl \
+    base-devel \
+    && pacman -Scc --noconfirm
+
+# Create a non-root user for testing
+RUN useradd -m -s /bin/bash testuser && \
+    echo "testuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Switch to test user
+USER testuser
+WORKDIR /home/testuser
+
+# Install Rust via rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+
+# Set up environment
+ENV HOME=/home/testuser
+ENV PATH=/home/testuser/.cargo/bin:$PATH
+
+# Copy the repository
+COPY --chown=testuser:testuser . /home/testuser/shift
+
+WORKDIR /home/testuser/shift
+
+# Run the test script
+CMD ["bash", "tests/test-distro.sh"]
