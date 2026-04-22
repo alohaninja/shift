@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use shift_core::{DriveMode, ShiftConfig, SvgMode};
 use std::io::{IsTerminal, Read};
 
@@ -14,6 +14,9 @@ use std::io::{IsTerminal, Read};
 #[derive(Parser, Debug)]
 #[command(name = "shift", version, about)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     /// Input file (JSON request payload). Reads stdin if omitted.
     #[arg()]
     file: Option<String>,
@@ -50,9 +53,27 @@ struct Cli {
     #[arg(long)]
     model: Option<String>,
 
+    /// Disable saving run statistics to ~/.shift/stats.jsonl
+    #[arg(long)]
+    no_stats: bool,
+
     /// Verbose output
     #[arg(short, long)]
     verbose: bool,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Show cumulative token savings across all recorded runs
+    Gain {
+        /// Show day-by-day breakdown
+        #[arg(long)]
+        daily: bool,
+
+        /// Output as JSON
+        #[arg(long, value_parser = ["json"])]
+        format: Option<String>,
+    },
 }
 
 /// Maximum stdin input size: 500 MB
@@ -67,6 +88,13 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    // Handle subcommands
+    if let Some(cmd) = &cli.command {
+        return match cmd {
+            Commands::Gain { daily, format } => run_gain(*daily, format.as_deref()),
+        };
+    }
 
     // Read input
     let input = read_input(&cli.file)?;
@@ -92,7 +120,7 @@ fn run() -> Result<()> {
     let config = ShiftConfig {
         mode: drive_mode,
         svg_mode,
-        provider,
+        provider: provider.clone(),
         model: cli.model,
         dry_run: cli.dry_run,
         verbose: cli.verbose,
@@ -109,6 +137,16 @@ fn run() -> Result<()> {
 
     // Process
     let (result, report) = shift_core::process(&payload, &config)?;
+
+    // Record stats (unless disabled or dry-run)
+    if !cli.no_stats && !cli.dry_run && report.images_found > 0 {
+        let record = shift_core::stats::record_from_report(&report, &provider);
+        if let Err(e) = shift_core::stats::record_run(&record, None) {
+            if cli.verbose {
+                eprintln!("shift: warning: failed to save stats: {}", e);
+            }
+        }
+    }
 
     // Output
     match cli.output.as_str() {
@@ -138,6 +176,125 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
+    let records = shift_core::stats::load_records(None)?;
+
+    if records.is_empty() {
+        println!("No SHIFT runs recorded yet. Stats are saved automatically after each run.");
+        println!("Use --no-stats to disable.");
+        return Ok(());
+    }
+
+    if daily {
+        let days = shift_core::stats::daily_breakdown(&records);
+        if format == Some("json") {
+            // Serialize daily data as JSON
+            let json_days: Vec<serde_json::Value> = days
+                .iter()
+                .map(|d| {
+                    serde_json::json!({
+                        "date": d.date,
+                        "runs": d.runs,
+                        "images": d.images,
+                        "openai_tokens_saved": d.openai_saved,
+                        "anthropic_tokens_saved": d.anthropic_saved,
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&json_days)?);
+        } else {
+            println!("=== SHIFT Daily Token Savings ===\n");
+            println!(
+                "{:<12} {:>5} {:>7} {:>15} {:>15}",
+                "Date", "Runs", "Images", "OpenAI saved", "Anthropic saved"
+            );
+            println!("{}", "-".repeat(58));
+            for d in &days {
+                println!(
+                    "{:<12} {:>5} {:>7} {:>15} {:>15}",
+                    d.date,
+                    d.runs,
+                    d.images,
+                    fmt_tokens(d.openai_saved),
+                    fmt_tokens(d.anthropic_saved),
+                );
+            }
+        }
+    } else {
+        let summary = shift_core::stats::summarize(&records);
+        if format == Some("json") {
+            let json = serde_json::json!({
+                "total_runs": summary.total_runs,
+                "total_images": summary.total_images,
+                "total_modified": summary.total_modified,
+                "bytes_saved": summary.bytes_saved(),
+                "openai_tokens_before": summary.total_openai_before,
+                "openai_tokens_after": summary.total_openai_after,
+                "openai_tokens_saved": summary.openai_saved(),
+                "openai_pct": summary.openai_pct(),
+                "anthropic_tokens_before": summary.total_anthropic_before,
+                "anthropic_tokens_after": summary.total_anthropic_after,
+                "anthropic_tokens_saved": summary.anthropic_saved(),
+                "anthropic_pct": summary.anthropic_pct(),
+            });
+            println!("{}", serde_json::to_string_pretty(&json)?);
+        } else {
+            println!("=== SHIFT Cumulative Savings ===\n");
+            println!("Runs:     {}", summary.total_runs);
+            println!(
+                "Images:   {} processed, {} modified",
+                summary.total_images, summary.total_modified
+            );
+            println!("Bytes:    {} saved", fmt_bytes(summary.bytes_saved()));
+            println!();
+            println!("Token Savings (estimated):");
+            if summary.total_openai_before > 0 {
+                println!(
+                    "  OpenAI:    {} -> {} tokens  ({:.1}% saved)",
+                    fmt_tokens(summary.total_openai_before),
+                    fmt_tokens(summary.total_openai_after),
+                    summary.openai_pct()
+                );
+            }
+            if summary.total_anthropic_before > 0 {
+                println!(
+                    "  Anthropic: {} -> {} tokens  ({:.1}% saved)",
+                    fmt_tokens(summary.total_anthropic_before),
+                    fmt_tokens(summary.total_anthropic_after),
+                    summary.anthropic_pct()
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn fmt_tokens(n: u64) -> String {
+    if n < 1_000 {
+        return n.to_string();
+    }
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
+fn fmt_bytes(n: u64) -> String {
+    if n < 1_024 {
+        format!("{} B", n)
+    } else if n < 1_048_576 {
+        format!("{:.1} KB", n as f64 / 1_024.0)
+    } else {
+        format!("{:.1} MB", n as f64 / 1_048_576.0)
+    }
+}
+
 fn read_input(file: &Option<String>) -> Result<String> {
     match file {
         Some(path) => {
@@ -147,7 +304,7 @@ fn read_input(file: &Option<String>) -> Result<String> {
             // Fix #18: Use std::io::IsTerminal instead of unmaintained `atty`
             if std::io::stdin().is_terminal() {
                 anyhow::bail!(
-                    "no input provided. Usage:\n  shift <file.json>\n  cat request.json | shift"
+                    "no input provided. Usage:\n  shift <file.json>\n  cat request.json | shift\n  shift gain          (show cumulative savings)"
                 );
             }
             // Fix #19: Limit stdin read size
