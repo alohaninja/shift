@@ -1,0 +1,40 @@
+{
+  "name": "anthropic",
+  "models": {
+    "claude-sonnet-4-20250514": {
+      "max_images": 20,
+      "max_image_dim": 8000,
+      "max_image_size_bytes": 5242880,
+      "max_image_megapixels": 1.15,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    },
+    "claude-opus-4-20250514": {
+      "max_images": 20,
+      "max_image_dim": 8000,
+      "max_image_size_bytes": 5242880,
+      "max_image_megapixels": 1.15,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    },
+    "claude-3-5-sonnet-20241022": {
+      "max_images": 20,
+      "max_image_dim": 8000,
+      "max_image_size_bytes": 5242880,
+      "max_image_megapixels": 1.15,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    },
+    "claude-3-5-haiku-20241022": {
+      "max_images": 20,
+      "max_image_dim": 8000,
+      "max_image_size_bytes": 5242880,
+      "max_image_megapixels": 1.15,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    }
+  },
+  "default": {
+    "max_images": 20,
+    "max_image_dim": 8000,
+    "max_image_size_bytes": 5242880,
+    "max_image_megapixels": 1.15,
+    "supported_formats": ["png", "jpeg", "gif", "webp"]
+  }
+}
