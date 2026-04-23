@@ -40,8 +40,8 @@ impl ProviderProfile {
 }
 
 // Embedded profiles compiled into the binary
-const OPENAI_PROFILE: &str = include_str!("../../../profiles/openai.json");
-const ANTHROPIC_PROFILE: &str = include_str!("../../../profiles/anthropic.json");
+const OPENAI_PROFILE: &str = include_str!("../../profiles/openai.json");
+const ANTHROPIC_PROFILE: &str = include_str!("../../profiles/anthropic.json");
 
 /// Load a built-in provider profile by name.
 pub fn load_builtin(provider: &str) -> Result<ProviderProfile> {

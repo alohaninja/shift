@@ -6,7 +6,7 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use shift_core::{pipeline, ShiftConfig, DriveMode};
+//! use shift_preflight::{pipeline, ShiftConfig, DriveMode};
 //! use serde_json::json;
 //!
 //! let payload = json!({

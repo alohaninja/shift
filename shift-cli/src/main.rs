@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use shift_core::report::fmt_tokens;
-use shift_core::{DriveMode, ShiftConfig, SvgMode};
+use shift_preflight::report::fmt_tokens;
+use shift_preflight::{DriveMode, ShiftConfig, SvgMode};
 use std::io::{IsTerminal, Read};
 
 /// SHIFT — Smart Hybrid Input Filtering & Transformation
@@ -13,7 +13,7 @@ use std::io::{IsTerminal, Read};
 /// images to meet provider constraints, and writes the safe payload
 /// to stdout.
 #[derive(Parser, Debug)]
-#[command(name = "shift", version, about)]
+#[command(name = "shift-ai", version, about)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -82,7 +82,7 @@ const MAX_STDIN_BYTES: u64 = 500_000_000;
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("shift: error: {:#}", e);
+        eprintln!("shift-ai: error: {:#}", e);
         std::process::exit(1);
     }
 }
@@ -126,24 +126,24 @@ fn run() -> Result<()> {
         dry_run: cli.dry_run,
         verbose: cli.verbose,
         profile_path: cli.profile,
-        limits: shift_core::SafetyLimits::default(),
+        limits: shift_preflight::SafetyLimits::default(),
     };
 
     if cli.verbose {
         eprintln!(
-            "shift: mode={}, provider={}, svg_mode={}, dry_run={}",
+            "shift-ai: mode={}, provider={}, svg_mode={}, dry_run={}",
             config.mode, config.provider, config.svg_mode, config.dry_run
         );
     }
 
     // Process
-    let (result, report) = shift_core::process(&payload, &config)?;
+    let (result, report) = shift_preflight::process(&payload, &config)?;
 
     // Record stats (unless disabled or dry-run)
     if !cli.no_stats && !cli.dry_run && report.images_found > 0 {
-        let record = shift_core::stats::record_from_report(&report, &provider);
-        if let Err(e) = shift_core::stats::record_run(&record, None) {
-            eprintln!("shift: warning: failed to save stats: {}", e);
+        let record = shift_preflight::stats::record_from_report(&report, &provider);
+        if let Err(e) = shift_preflight::stats::record_run(&record, None) {
+            eprintln!("shift-ai: warning: failed to save stats: {}", e);
         }
     }
 
@@ -176,7 +176,7 @@ fn run() -> Result<()> {
 }
 
 fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
-    let load_result = shift_core::stats::load_records(None)?;
+    let load_result = shift_preflight::stats::load_records(None)?;
     let records = load_result.records;
 
     if records.is_empty() {
@@ -186,7 +186,7 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
     }
 
     if daily {
-        let days = shift_core::stats::daily_breakdown(&records);
+        let days = shift_preflight::stats::daily_breakdown(&records);
         if format == Some("json") {
             // Serialize daily data as JSON
             let json_days: Vec<serde_json::Value> = days
@@ -221,7 +221,7 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
             }
         }
     } else {
-        let summary = shift_core::stats::summarize(&records);
+        let summary = shift_preflight::stats::summarize(&records);
         if format == Some("json") {
             let json = serde_json::json!({
                 "total_runs": summary.total_runs,
@@ -295,7 +295,7 @@ fn read_input(file: &Option<String>) -> Result<String> {
             // Fix #18: Use std::io::IsTerminal instead of unmaintained `atty`
             if std::io::stdin().is_terminal() {
                 anyhow::bail!(
-                    "no input provided. Usage:\n  shift <file.json>\n  cat request.json | shift\n  shift gain          (show cumulative savings)"
+                    "no input provided. Usage:\n  shift-ai <file.json>\n  cat request.json | shift-ai\n  shift-ai gain       (show cumulative savings)"
                 );
             }
             // Fix #19: Limit stdin read size

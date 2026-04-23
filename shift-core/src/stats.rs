@@ -213,7 +213,7 @@ pub fn load_records(path: Option<&PathBuf>) -> Result<LoadResult> {
         // Skip excessively long lines (likely corrupt)
         if trimmed.len() > MAX_LINE_LENGTH {
             eprintln!(
-                "shift: warning: skipping oversized stats line {} ({} bytes)",
+                "shift-ai: warning: skipping oversized stats line {} ({} bytes)",
                 i + 1,
                 trimmed.len()
             );
@@ -225,7 +225,7 @@ pub fn load_records(path: Option<&PathBuf>) -> Result<LoadResult> {
             Err(e) => {
                 // Skip malformed lines rather than failing
                 eprintln!(
-                    "shift: warning: skipping malformed stats line {}: {}",
+                    "shift-ai: warning: skipping malformed stats line {}: {}",
                     i + 1,
                     e
                 );
@@ -235,7 +235,7 @@ pub fn load_records(path: Option<&PathBuf>) -> Result<LoadResult> {
         // Cap total records to prevent unbounded memory allocation
         if records.len() >= MAX_STATS_RECORDS {
             eprintln!(
-                "shift: warning: stats file has >{} entries, loading only the first {}",
+                "shift-ai: warning: stats file has >{} entries, loading only the first {}",
                 MAX_STATS_RECORDS, MAX_STATS_RECORDS
             );
             break;

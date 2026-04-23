@@ -107,7 +107,7 @@ impl Default for Report {
 ///
 /// # Examples
 /// ```
-/// # use shift_core::report::fmt_tokens;
+/// # use shift_preflight::report::fmt_tokens;
 /// assert_eq!(fmt_tokens(1234567), "1,234,567");
 /// assert_eq!(fmt_tokens(42), "42");
 /// ```

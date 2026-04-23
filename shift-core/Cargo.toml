@@ -1,5 +1,5 @@
 [package]
-name = "shift-core"
+name = "shift-preflight"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,6 +9,7 @@ homepage = "https://github.com/alohaninja/shift"
 keywords = ["ai", "openai", "anthropic", "image", "token"]
 categories = ["multimedia::images", "command-line-utilities"]
 readme = "../README.md"
+exclude = ["tests/"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

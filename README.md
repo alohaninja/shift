@@ -42,7 +42,7 @@ SHIFT estimates per-provider token savings for every run. Both OpenAI and Anthro
 ### Sample report
 
 ```
-$ cat request.json | shift -m economy -o report
+$ cat request.json | shift-ai -m economy -o report
 
 === SHIFT Report ===
 Images found:      1
@@ -65,10 +65,10 @@ Actions:
 
 ### Cumulative tracking
 
-SHIFT automatically records run statistics to `~/.shift/stats.jsonl`. View cumulative savings with `shift gain`:
+SHIFT automatically records run statistics to `~/.shift/stats.jsonl`. View cumulative savings with `shift-ai gain`:
 
 ```
-$ shift gain
+$ shift-ai gain
 
 === SHIFT Cumulative Savings ===
 
@@ -82,7 +82,7 @@ Token Savings (estimated):
 ```
 
 ```
-$ shift gain --daily
+$ shift-ai gain --daily
 
 === SHIFT Daily Token Savings ===
 
@@ -93,23 +93,28 @@ Date          Runs  Images    OpenAI saved Anthropic saved
 2026-04-22      22      90          12,100          18,500
 ```
 
-Use `shift gain --format json` for machine-readable output.
+Use `shift-ai gain --format json` for machine-readable output.
 
 ## Install
 
-### From source (recommended)
+### From crates.io
 
 ```bash
-# Clone and install the CLI globally
+cargo install shift-preflight-cli
+```
+
+### From GitHub (latest)
+
+```bash
+cargo install --git https://github.com/alohaninja/shift shift-preflight-cli
+```
+
+### From source
+
+```bash
 git clone https://github.com/alohaninja/shift.git
 cd shift
 cargo install --path shift-cli
-```
-
-### From GitHub (no clone needed)
-
-```bash
-cargo install --git https://github.com/alohaninja/shift shift-cli
 ```
 
 ### Build without installing
@@ -118,7 +123,7 @@ cargo install --git https://github.com/alohaninja/shift shift-cli
 git clone https://github.com/alohaninja/shift.git
 cd shift
 cargo build --release
-# Binary at target/release/shift
+# Binary at target/release/shift-ai
 ```
 
 ### Pre-built binaries
@@ -128,30 +133,30 @@ Download from [GitHub Releases](https://github.com/alohaninja/shift/releases) �
 ### Verify installation
 
 ```bash
-shift --version
-shift --help
+shift-ai --version
+shift-ai --help
 
 # Quick validation — transform a sample payload
-echo '{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}' | shift
+echo '{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}' | shift-ai
 
 # Check stats tracking
-shift gain
+shift-ai gain
 ```
 
 ## Quick start
 
 ```bash
 # Transform an OpenAI request (stdin/stdout pipe)
-cat request.json | shift -p openai -m balanced > safe_request.json
+cat request.json | shift-ai -p openai -m balanced > safe_request.json
 
 # Transform an Anthropic request from a file
-shift request.json -p anthropic -m economy > safe_request.json
+shift-ai request.json -p anthropic -m economy > safe_request.json
 
 # See what would change without modifying anything
-shift request.json --dry-run -o report
+shift-ai request.json --dry-run -o report
 
 # Compose with curl
-shift request.json -p openai | curl -s -X POST \
+shift-ai request.json -p openai | curl -s -X POST \
   https://api.openai.com/v1/chat/completions \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
@@ -161,7 +166,7 @@ shift request.json -p openai | curl -s -X POST \
 ## Options
 
 ```
-shift [OPTIONS] [FILE]
+shift-ai [OPTIONS] [FILE]
 
 Arguments:
   [FILE]  Input file (JSON request payload). Reads stdin if omitted.
@@ -182,9 +187,9 @@ Options:
   -v, --verbose              Verbose output
 
 Commands:
-  shift gain                 Show cumulative token savings
-  shift gain --daily         Day-by-day breakdown
-  shift gain --format json   Machine-readable output for dashboards
+  shift-ai gain                 Show cumulative token savings
+  shift-ai gain --daily         Day-by-day breakdown
+  shift-ai gain --format json   Machine-readable output for dashboards
 ```
 
 ## Drive modes
@@ -232,10 +237,16 @@ Custom profiles can be loaded with `--profile custom.json`.
 
 ## Library usage
 
-SHIFT is split into two crates: `shift-core` (library) and `shift-cli` (binary). The library can be used directly in Rust applications:
+SHIFT is split into two crates: `shift-preflight` (library) and `shift-preflight-cli` (binary, installs as `shift-ai`). The library can be used directly in Rust applications:
+
+```toml
+# Cargo.toml
+[dependencies]
+shift-preflight = "0.1"
+```
 
 ```rust
-use shift_core::{pipeline, ShiftConfig, DriveMode};
+use shift_preflight::{pipeline, ShiftConfig, DriveMode};
 use serde_json::json;
 
 let payload = json!({
@@ -273,7 +284,7 @@ eprintln!("{}", report); // what changed and why
 
 ```
 shift/
-├── shift-core/          Library crate (all processing logic)
+├── shift-core/          Library crate: shift-preflight (all processing logic)
 │   └── src/
 │       ├── inspector/   Format detection, metadata extraction
 │       ├── policy/      Provider profiles, constraint evaluation, rules
@@ -284,7 +295,7 @@ shift/
 │       ├── stats.rs     Persistent run statistics, gain summaries
 │       ├── report.rs    Transformation report with token savings
 │       └── mode.rs      DriveMode, SvgMode, ShiftConfig
-├── shift-cli/           Binary crate (CLI + gain subcommand)
+├── shift-cli/           Binary crate: shift-preflight-cli → shift-ai
 ├── profiles/            Provider constraint JSON (embedded at compile time)
 ├── tests/
 │   ├── fixtures/        Test images and sample payloads

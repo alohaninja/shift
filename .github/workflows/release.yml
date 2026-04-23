@@ -69,21 +69,18 @@ jobs:
           EOF
 
       - name: Build release
-        run: cargo build --release --target ${{ matrix.target }} -p shift-cli
-
-      - name: Rename binary
-        run: cp target/${{ matrix.target }}/release/shift-cli target/${{ matrix.target }}/release/shift
+        run: cargo build --release --target ${{ matrix.target }} -p shift-preflight-cli
 
       - name: Archive
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../shift-${{ matrix.target }}.tar.gz shift
+          tar czf ../../../shift-ai-${{ matrix.target }}.tar.gz shift-ai
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shift-${{ matrix.target }}
-          path: shift-${{ matrix.target }}.tar.gz
+          name: shift-ai-${{ matrix.target }}
+          path: shift-ai-${{ matrix.target }}.tar.gz
 
   publish-release:
     needs: [release-please, build-release]
@@ -102,7 +99,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum shift-*.tar.gz > checksums.txt
+          sha256sum shift-ai-*.tar.gz > checksums.txt
           cat checksums.txt
 
       - name: Upload release assets
@@ -110,6 +107,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ needs.release-please.outputs.tag_name }} \
-            artifacts/shift-*.tar.gz \
+            artifacts/shift-ai-*.tar.gz \
             artifacts/checksums.txt \
             --clobber
