@@ -97,38 +97,37 @@ Use `shift-ai gain --format json` for machine-readable output.
 
 ## Install
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap alohaninja/shift
+brew install shift-ai
+```
+
+### Quick install script
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alohaninja/shift/main/install.sh | sh
+```
+
+Installs to `~/.local/bin`. Detects OS/arch automatically (macOS x86/arm, Linux x86/arm).
+
 ### From crates.io
 
 ```bash
 cargo install shift-preflight-cli
 ```
 
-### From GitHub (latest)
+### Pre-built binaries
 
-```bash
-cargo install --git https://github.com/alohaninja/shift shift-preflight-cli
-```
+Download from [GitHub Releases](https://github.com/alohaninja/shift/releases) — macOS (x86/arm) and Linux (x86/arm).
 
 ### From source
 
 ```bash
-git clone https://github.com/alohaninja/shift.git
-cd shift
+git clone https://github.com/alohaninja/shift.git && cd shift
 cargo install --path shift-cli
 ```
-
-### Build without installing
-
-```bash
-git clone https://github.com/alohaninja/shift.git
-cd shift
-cargo build --release
-# Binary at target/release/shift-ai
-```
-
-### Pre-built binaries
-
-Download from [GitHub Releases](https://github.com/alohaninja/shift/releases) — macOS (x86/arm) and Linux (x86/arm).
 
 ### Verify installation
 

@@ -4,7 +4,7 @@ set -euo pipefail
 REPO="alohaninja/shift"
 INSTALL_DIR="${HOME}/.local/bin"
 
-echo "Installing shift..."
+echo "Installing shift-ai..."
 
 # Check dependencies
 for cmd in curl tar; do
@@ -45,7 +45,7 @@ else
   TARGET="${ARCH}-${OS}"
 fi
 
-ARCHIVE="shift-${TARGET}.tar.gz"
+ARCHIVE="shift-ai-${TARGET}.tar.gz"
 BASE_URL="https://github.com/${REPO}/releases/latest/download"
 URL="${BASE_URL}/${ARCHIVE}"
 CHECKSUMS_URL="${BASE_URL}/checksums.txt"
@@ -76,13 +76,12 @@ curl -fSL "${CHECKSUMS_URL}" -o "${TMPDIR}/checksums.txt" 2>/dev/null && {
 }
 
 # Extract only the expected file (defense against path traversal)
-tar xzf "${TMPDIR}/${ARCHIVE}" -C "${TMPDIR}" shift
-install -m 755 "${TMPDIR}/shift" "${INSTALL_DIR}/shift"
+tar xzf "${TMPDIR}/${ARCHIVE}" -C "${TMPDIR}" shift-ai
+install -m 755 "${TMPDIR}/shift-ai" "${INSTALL_DIR}/shift-ai"
 
-echo "Installed shift to ${INSTALL_DIR}/shift"
+echo "Installed shift-ai to ${INSTALL_DIR}/shift-ai"
 
-# Verify using the full path (avoid bash builtin collision)
-if "${INSTALL_DIR}/shift" --version 2>/dev/null; then
+if "${INSTALL_DIR}/shift-ai" --version 2>/dev/null; then
   echo "Verified installation."
 else
   echo ""
