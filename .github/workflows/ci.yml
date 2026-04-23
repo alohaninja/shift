@@ -70,10 +70,10 @@ jobs:
       - run: cargo build --release --workspace
       - name: Binary size
         run: |
-          ls -lh target/release/shift
-          SIZE=$(stat -f%z target/release/shift 2>/dev/null || stat -c%s target/release/shift)
+          ls -lh target/release/shift-ai
+          SIZE=$(stat -f%z target/release/shift-ai 2>/dev/null || stat -c%s target/release/shift-ai)
           echo "### Binary size (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
-          echo "shift: $(echo $SIZE | awk '{printf "%.1f MB", $1/1048576}')" >> $GITHUB_STEP_SUMMARY
+          echo "shift-ai: $(echo $SIZE | awk '{printf "%.1f MB", $1/1048576}')" >> $GITHUB_STEP_SUMMARY
 
   # ── Security audit ─────────────────────────────────────────
   audit:

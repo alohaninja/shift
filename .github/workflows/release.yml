@@ -22,6 +22,7 @@ jobs:
         with:
           release-type: rust
 
+  # ── Cross-compile binaries ───────────────────────────────────
   build-release:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
@@ -82,6 +83,7 @@ jobs:
           name: shift-ai-${{ matrix.target }}
           path: shift-ai-${{ matrix.target }}.tar.gz
 
+  # ── Upload binaries + checksums to GitHub Release ────────────
   publish-release:
     needs: [release-please, build-release]
     runs-on: ubuntu-latest
@@ -105,8 +107,127 @@ jobs:
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          gh release upload ${{ needs.release-please.outputs.tag_name }} \
+          gh release upload "${TAG_NAME}" \
             artifacts/shift-ai-*.tar.gz \
             artifacts/checksums.txt \
             --clobber
+
+      - name: Update latest tag
+        run: |
+          git tag -f latest
+          git push -f origin latest
+
+  # ── Publish to crates.io ─────────────────────────────────────
+  publish-crates:
+    needs: [release-please]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish shift-preflight (library)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p shift-preflight --quiet
+
+      - name: Publish shift-preflight-cli (binary, with retry)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if cargo publish -p shift-preflight-cli --quiet; then
+              echo "Published shift-preflight-cli"
+              exit 0
+            fi
+            echo "Attempt ${attempt} failed — crates.io index may not have propagated yet. Waiting 30s..."
+            sleep 30
+          done
+          echo "Failed to publish shift-preflight-cli after 5 attempts" >&2
+          exit 1
+
+  # ── Update Homebrew formula ──────────────────────────────────
+  update-homebrew:
+    needs: [release-please, publish-release]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Update Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          # Validate inputs
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version: $VERSION" >&2
+            exit 1
+          fi
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid tag: $TAG" >&2
+            exit 1
+          fi
+
+          TARBALL_URL="https://github.com/alohaninja/shift/archive/refs/tags/${TAG}.tar.gz"
+
+          # Download source tarball to a file and compute SHA256
+          curl -fSL "${TARBALL_URL}" -o /tmp/source.tar.gz
+          SHA256=$(sha256sum /tmp/source.tar.gz | cut -d' ' -f1)
+
+          if ! [[ "$SHA256" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "Invalid SHA256: $SHA256" >&2
+            exit 1
+          fi
+
+          # Generate the formula (heredoc must not be indented)
+          cat > /tmp/shift-ai.rb <<RUBY
+          class ShiftAi < Formula
+            desc "Multimodal preflight layer that transforms images before they reach AI model APIs"
+            homepage "https://github.com/alohaninja/shift"
+            license "Apache-2.0"
+            head "https://github.com/alohaninja/shift.git", branch: "main"
+
+            url "${TARBALL_URL}"
+            sha256 "${SHA256}"
+            version "${VERSION}"
+
+            depends_on "rust" => :build
+
+            def install
+              system "cargo", "install", *std_cargo_args(path: "shift-cli")
+            end
+
+            test do
+              assert_match "shift-ai", shell_output("#{bin}/shift-ai --version")
+            end
+          end
+          RUBY
+
+          # Push to the homebrew tap repo via GitHub API
+          CONTENT=$(base64 -w 0 /tmp/shift-ai.rb)
+
+          # Get current file SHA (for update, not create)
+          CURRENT_SHA=$(gh api repos/alohaninja/homebrew-shift/contents/Formula/shift-ai.rb \
+            --jq '.sha' 2>/dev/null || echo "")
+
+          if [ -n "$CURRENT_SHA" ]; then
+            gh api repos/alohaninja/homebrew-shift/contents/Formula/shift-ai.rb \
+              --method PUT \
+              -f message="Update shift-ai to ${VERSION}" \
+              -f content="${CONTENT}" \
+              -f sha="${CURRENT_SHA}"
+          else
+            gh api repos/alohaninja/homebrew-shift/contents/Formula/shift-ai.rb \
+              --method PUT \
+              -f message="Add shift-ai ${VERSION}" \
+              -f content="${CONTENT}"
+          fi
+
+          echo "Updated Homebrew formula to ${VERSION}"
