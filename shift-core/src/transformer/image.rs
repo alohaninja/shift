@@ -73,13 +73,20 @@ fn load_image_safe(data: &[u8]) -> Result<DynamicImage> {
 }
 
 /// Resize an image to fit within target dimensions, preserving aspect ratio.
+///
+/// Re-encodes in the same format as the input. JPEG inputs stay JPEG (quality 85),
+/// avoiding the size inflation that would occur from converting to PNG.
+/// Non-JPEG inputs (PNG, GIF, WebP, etc.) are encoded as PNG for lossless safety.
 fn resize_image(data: &[u8], target_width: u32, target_height: u32) -> Result<Vec<u8>> {
+    let input_format = crate::inspector::detect_format(data);
     let img = load_image_safe(data)?;
 
     let resized = img.resize(target_width, target_height, FilterType::Lanczos3);
 
-    // Encode as PNG (lossless, safe for all providers)
-    encode_png(&resized)
+    match input_format {
+        crate::inspector::MediaFormat::Jpeg => encode_jpeg(&resized, 85),
+        _ => encode_png(&resized),
+    }
 }
 
 /// Recompress an image as JPEG at the given quality.
@@ -138,6 +145,22 @@ fn encode_png(img: &DynamicImage) -> Result<Vec<u8>> {
             image::ExtendedColorType::Rgba8,
         )
         .context("failed to encode PNG")?;
+    Ok(buf)
+}
+
+/// Encode a DynamicImage as JPEG at the given quality.
+fn encode_jpeg(img: &DynamicImage, quality: u8) -> Result<Vec<u8>> {
+    let rgb = img.to_rgb8();
+    let mut buf = Vec::new();
+    let encoder = JpegEncoder::new_with_quality(&mut buf, quality);
+    encoder
+        .write_image(
+            rgb.as_raw(),
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )
+        .context("failed to encode JPEG")?;
     Ok(buf)
 }
 
@@ -230,14 +253,33 @@ mod tests {
     }
 
     #[test]
-    fn test_resize_preserves_format_as_png() {
-        let data = make_test_png(3000, 2000);
+    fn test_resize_preserves_jpeg_format() {
+        let data = make_test_jpeg(4000, 3000);
         let action = Action::Resize {
-            target_width: 1024,
-            target_height: 1024,
+            target_width: 2048,
+            target_height: 2048,
         };
         let result = transform_image(&data, &action).unwrap();
-        assert_eq!(detect_format(&result), MediaFormat::Png);
+
+        // Must still be JPEG after resize — not converted to PNG
+        assert_eq!(
+            detect_format(&result),
+            MediaFormat::Jpeg,
+            "resized JPEG should remain JPEG, not be converted to PNG"
+        );
+
+        // Verify dimensions are within the target
+        let img = image::load_from_memory(&result).unwrap();
+        assert!(img.width() <= 2048);
+        assert!(img.height() <= 2048);
+
+        // Verify aspect ratio is preserved
+        let ratio_orig = 4000.0 / 3000.0;
+        let ratio_new = img.width() as f64 / img.height() as f64;
+        assert!(
+            (ratio_orig - ratio_new).abs() < 0.02,
+            "aspect ratio should be preserved"
+        );
     }
 
     #[test]

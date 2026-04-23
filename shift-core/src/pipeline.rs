@@ -227,7 +227,13 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
                                 output_mime = format!("image/{}", to);
                             }
                             policy::Action::Resize { .. } => {
-                                output_mime = "image/png".to_string();
+                                // Resize preserves the input format for JPEG;
+                                // other formats are encoded as PNG.
+                                if meta.format == MediaFormat::Jpeg {
+                                    output_mime = "image/jpeg".to_string();
+                                } else {
+                                    output_mime = "image/png".to_string();
+                                }
                             }
                             policy::Action::Recompress { .. } => {
                                 output_mime = "image/jpeg".to_string();
@@ -666,6 +672,108 @@ mod tests {
         };
         let (_result, report) = process(&payload, &config).unwrap();
         assert!(report.has_changes());
+    }
+
+    fn make_anthropic_jpeg_base64(width: u32, height: u32) -> String {
+        use base64::Engine;
+        let img = image::RgbImage::new(width, height);
+        let mut buf = Vec::new();
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 90);
+        image::ImageEncoder::write_image(
+            encoder,
+            img.as_raw(),
+            width,
+            height,
+            image::ExtendedColorType::Rgb8,
+        )
+        .unwrap();
+        base64::engine::general_purpose::STANDARD.encode(&buf)
+    }
+
+    #[test]
+    fn test_resize_preserves_jpeg_format_in_anthropic_payload() {
+        let b64 = make_anthropic_jpeg_base64(4000, 3000);
+        let payload = json!({
+            "model": "claude-sonnet-4-20250514",
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}
+                }]
+            }]
+        });
+        let config = ShiftConfig {
+            provider: "anthropic".to_string(),
+            mode: DriveMode::Balanced,
+            ..Default::default()
+        };
+        let (result, report) = process(&payload, &config).unwrap();
+
+        // Should have been resized
+        assert!(report.has_changes());
+        assert!(report.actions.iter().any(|a| a.action == "resize"));
+
+        // The output payload's media_type must still be image/jpeg
+        let media_type = result["messages"][0]["content"][0]["source"]["media_type"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            media_type, "image/jpeg",
+            "resized JPEG in Anthropic payload should retain image/jpeg media_type, got {}",
+            media_type
+        );
+
+        // Verify the image data is actually JPEG
+        use base64::Engine;
+        let out_b64 = result["messages"][0]["content"][0]["source"]["data"]
+            .as_str()
+            .unwrap();
+        let out_bytes = base64::engine::general_purpose::STANDARD
+            .decode(out_b64)
+            .unwrap();
+        assert_eq!(
+            crate::inspector::detect_format(&out_bytes),
+            crate::inspector::MediaFormat::Jpeg,
+            "decoded image bytes should be JPEG format"
+        );
+
+        // Verify report shows jpeg -> jpeg, not jpeg -> png
+        let img_metrics = &report.image_metrics[0];
+        assert_eq!(img_metrics.format_before, "jpeg");
+        assert_eq!(
+            img_metrics.format_after, "jpeg",
+            "report should show jpeg -> jpeg, not jpeg -> png"
+        );
+    }
+
+    #[test]
+    fn test_resize_preserves_png_format_in_anthropic_payload() {
+        let b64 = make_anthropic_png_base64(4000, 3000);
+        let payload = json!({
+            "model": "claude-sonnet-4-20250514",
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": b64}
+                }]
+            }]
+        });
+        let config = ShiftConfig {
+            provider: "anthropic".to_string(),
+            mode: DriveMode::Balanced,
+            ..Default::default()
+        };
+        let (result, report) = process(&payload, &config).unwrap();
+
+        assert!(report.has_changes());
+
+        // PNG should still be PNG
+        let media_type = result["messages"][0]["content"][0]["source"]["media_type"]
+            .as_str()
+            .unwrap();
+        assert_eq!(media_type, "image/png");
     }
 
     #[test]
