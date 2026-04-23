@@ -26,6 +26,75 @@ SHIFT sits between your application and the model API. Every request passes thro
 
 **After SHIFT:** every request is valid, optimized, and tuned to your cost/quality preference.
 
+## Token savings
+
+SHIFT estimates per-provider token savings for every run. Both OpenAI and Anthropic charge tokens based on image dimensions — resizing images before they hit the API reduces cost.
+
+| Scenario | Before | After | OpenAI tokens | Anthropic tokens |
+|---|---|---|---|---|
+| 4000×3000 hero image (balanced) | 4000×3000 | 2048×1536 | 765 → 765 | 1,568 → 1,568 |
+| 4000×3000 hero image (economy) | 4000×3000 | 1024×768 | 765 → 765 | 1,568 → 1,082 (−31%) |
+| 1254×1254 app icon (economy) | 1254×1254 | 1024×1024 | 765 → 765 | 1,568 → 1,405 (−10%) |
+| SVG diagram → rasterized PNG | SVG | 512×256 PNG | 255 → 255 | 0 → 98 |
+
+*Token estimates based on published provider formulas. OpenAI uses tile-based counting (GPT-4o/4.1 family, 512×512 tiles); Anthropic uses pixel-based (`w×h/750`, 1568px long-edge cap for standard models). Actual billing may vary by model — newer OpenAI models use patch-based counting, and Anthropic Opus 4.7 supports higher resolution (2576px, 4784 max tokens).*
+
+### Sample report
+
+```
+$ cat request.json | shift -m economy -o report
+
+=== SHIFT Report ===
+Images found:      1
+Images modified:   1
+Images dropped:    0
+Original size:     42262 bytes
+Transformed size:  17018 bytes
+Size reduction:    59.7%
+
+Token Savings (estimated):
+  OpenAI:    765 -> 765 tokens  (0.0% saved)
+  Anthropic: 1,568 -> 1,082 tokens  (31.0% saved)
+
+Per-image breakdown:
+  [0] 4000x3000 -> 1024x768  (OpenAI: 765 -> 765, Anthropic: 1,568 -> 1,082)
+
+Actions:
+  [image 0] resize — 4000x3000 -> 1024x768
+```
+
+### Cumulative tracking
+
+SHIFT automatically records run statistics to `~/.shift/stats.jsonl`. View cumulative savings with `shift gain`:
+
+```
+$ shift gain
+
+=== SHIFT Cumulative Savings ===
+
+Runs:     42
+Images:   156 processed, 89 modified
+Bytes:    247.3 MB saved
+
+Token Savings (estimated):
+  OpenAI:    52,400 -> 12,300 tokens  (76.5% saved)
+  Anthropic: 84,200 -> 28,100 tokens  (66.6% saved)
+```
+
+```
+$ shift gain --daily
+
+=== SHIFT Daily Token Savings ===
+
+Date          Runs  Images    OpenAI saved Anthropic saved
+----------------------------------------------------------
+2026-04-20       8      24           3,200           5,400
+2026-04-21      12      42           4,800           8,200
+2026-04-22      22      90          12,100          18,500
+```
+
+Use `shift gain --format json` for machine-readable output.
+
 ## Install
 
 ```bash
@@ -75,11 +144,17 @@ Options:
       --svg-mode <MODE>      SVG handling [default: raster]
                               [raster, source, hybrid]
   -o, --output <FORMAT>      Output format [default: json]
-                              [json, report, both]
+                              [json, report, json-report, both]
       --dry-run              Show what would change without modifying
       --profile <FILE>       Custom provider profile JSON
       --model <MODEL>        Target model (overrides model in payload)
+      --no-stats             Disable saving run statistics
   -v, --verbose              Verbose output
+
+Commands:
+  shift gain                 Show cumulative token savings
+  shift gain --daily         Day-by-day breakdown
+  shift gain --format json   Machine-readable output for dashboards
 ```
 
 ## Drive modes
@@ -175,11 +250,16 @@ shift/
 │       ├── transformer/ Image resize, recompress, SVG rasterize, convert
 │       ├── payload/     OpenAI + Anthropic message format parse/reconstruct
 │       ├── pipeline.rs  Orchestrator: inspect -> policy -> transform
-│       ├── report.rs    Transformation report
+│       ├── cost.rs      Token estimation (OpenAI tile, Anthropic pixel)
+│       ├── stats.rs     Persistent run statistics, gain summaries
+│       ├── report.rs    Transformation report with token savings
 │       └── mode.rs      DriveMode, SvgMode, ShiftConfig
-├── shift-cli/           Binary crate (CLI interface)
+├── shift-cli/           Binary crate (CLI + gain subcommand)
 ├── profiles/            Provider constraint JSON (embedded at compile time)
-└── tests/fixtures/      Test images and sample payloads
+├── tests/
+│   ├── fixtures/        Test images and sample payloads
+│   └── docker/          Dockerfiles for cross-distro CI (Ubuntu, Arch)
+└── .github/workflows/   CI + Linux distro tests
 ```
 
 ## Roadmap (v2+)

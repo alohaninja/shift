@@ -23,14 +23,18 @@
 //! let (transformed, report) = pipeline::process(&payload, &config).unwrap();
 //! ```
 
+pub mod cost;
 pub mod inspector;
 pub mod mode;
 pub mod payload;
 pub mod pipeline;
 pub mod policy;
 pub mod report;
+pub mod stats;
 pub mod transformer;
 
+pub use cost::{ImageMetrics, TokenEstimate, TokenSavings};
 pub use mode::{DriveMode, SafetyLimits, ShiftConfig, SvgMode};
 pub use pipeline::process;
 pub use report::Report;
+pub use stats::RunRecord;

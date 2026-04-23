@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::cost::{ImageMetrics, TokenSavings};
+
 /// Record of a single transformation action taken.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionRecord {
@@ -33,6 +35,10 @@ pub struct Report {
     pub warnings: Vec<String>,
     /// Whether this was a dry run (no actual changes)
     pub dry_run: bool,
+    /// Per-image before/after metrics (dimensions, bytes, tokens)
+    pub image_metrics: Vec<ImageMetrics>,
+    /// Aggregate token savings across all images
+    pub token_savings: TokenSavings,
 }
 
 impl Report {
@@ -47,6 +53,8 @@ impl Report {
             actions: Vec::new(),
             warnings: Vec::new(),
             dry_run: false,
+            image_metrics: Vec::new(),
+            token_savings: TokenSavings::default(),
         }
     }
 
@@ -60,6 +68,15 @@ impl Report {
 
     pub fn add_warning(&mut self, warning: &str) {
         self.warnings.push(warning.to_string());
+    }
+
+    pub fn add_image_metrics(&mut self, metrics: ImageMetrics) {
+        self.image_metrics.push(metrics);
+    }
+
+    /// Recompute aggregate token savings from per-image metrics.
+    pub fn finalize_token_savings(&mut self) {
+        self.token_savings = TokenSavings::from_metrics(&self.image_metrics);
     }
 
     /// Size reduction as a percentage.
@@ -83,6 +100,22 @@ impl Default for Report {
     }
 }
 
+/// Format a token count with thousands separators.
+pub fn fmt_tokens(n: u64) -> String {
+    if n < 1_000 {
+        return n.to_string();
+    }
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
 impl fmt::Display for Report {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.dry_run {
@@ -101,6 +134,72 @@ impl fmt::Display for Report {
         writeln!(f, "Transformed size:  {} bytes", self.transformed_size)?;
         if self.original_size > 0 {
             writeln!(f, "Size reduction:    {:.1}%", self.size_reduction_pct())?;
+        }
+
+        // Token savings section
+        let ts = &self.token_savings;
+        if ts.openai_before > 0 || ts.anthropic_before > 0 {
+            writeln!(f)?;
+            writeln!(f, "Token Savings (estimated):")?;
+            if ts.openai_before > 0 {
+                writeln!(
+                    f,
+                    "  OpenAI:    {} -> {} tokens  ({:.1}% saved)",
+                    fmt_tokens(ts.openai_before),
+                    fmt_tokens(ts.openai_after),
+                    ts.openai_pct()
+                )?;
+            }
+            if ts.anthropic_before > 0 {
+                writeln!(
+                    f,
+                    "  Anthropic: {} -> {} tokens  ({:.1}% saved)",
+                    fmt_tokens(ts.anthropic_before),
+                    fmt_tokens(ts.anthropic_after),
+                    ts.anthropic_pct()
+                )?;
+            }
+        }
+
+        // Per-image breakdown
+        if !self.image_metrics.is_empty()
+            && self.image_metrics.iter().any(|m| {
+                m.original_width != m.transformed_width || m.original_height != m.transformed_height
+            })
+        {
+            writeln!(f)?;
+            writeln!(f, "Per-image breakdown:")?;
+            for m in &self.image_metrics {
+                let dims_changed = m.original_width != m.transformed_width
+                    || m.original_height != m.transformed_height;
+                let fmt_changed = m.format_before != m.format_after;
+
+                if dims_changed || fmt_changed {
+                    let fmt_str = if fmt_changed {
+                        format!(
+                            "  {}->{}",
+                            m.format_before.to_uppercase(),
+                            m.format_after.to_uppercase()
+                        )
+                    } else {
+                        String::new()
+                    };
+                    writeln!(
+                        f,
+                        "  [{}] {}x{} -> {}x{}{}  (OpenAI: {} -> {}, Anthropic: {} -> {})",
+                        m.image_index,
+                        m.original_width,
+                        m.original_height,
+                        m.transformed_width,
+                        m.transformed_height,
+                        fmt_str,
+                        fmt_tokens(m.tokens_before.openai_tokens),
+                        fmt_tokens(m.tokens_after.openai_tokens),
+                        fmt_tokens(m.tokens_before.anthropic_tokens),
+                        fmt_tokens(m.tokens_after.anthropic_tokens),
+                    )?;
+                }
+            }
         }
 
         if !self.actions.is_empty() {
@@ -174,5 +273,49 @@ mod tests {
         assert!(output.contains("Images modified:   1"));
         assert!(output.contains("resize"));
         assert!(output.contains("may lose detail"));
+    }
+
+    #[test]
+    fn test_report_display_with_token_savings() {
+        use crate::cost::{estimate_tokens, ImageMetrics};
+
+        let mut report = Report::new();
+        report.images_found = 1;
+        report.images_modified = 1;
+        report.original_size = 5_000_000;
+        report.transformed_size = 500_000;
+
+        let before = estimate_tokens(4000, 3000);
+        let after = estimate_tokens(2048, 1536);
+        report.add_image_metrics(ImageMetrics {
+            image_index: 0,
+            original_width: 4000,
+            original_height: 3000,
+            transformed_width: 2048,
+            transformed_height: 1536,
+            original_bytes: 5_000_000,
+            transformed_bytes: 500_000,
+            format_before: "png".to_string(),
+            format_after: "png".to_string(),
+            tokens_before: before,
+            tokens_after: after,
+        });
+        report.finalize_token_savings();
+
+        let output = format!("{}", report);
+        assert!(output.contains("Token Savings"));
+        assert!(output.contains("OpenAI:"));
+        assert!(output.contains("Anthropic:"));
+        assert!(output.contains("Per-image breakdown:"));
+    }
+
+    #[test]
+    fn test_fmt_tokens() {
+        assert_eq!(fmt_tokens(0), "0");
+        assert_eq!(fmt_tokens(42), "42");
+        assert_eq!(fmt_tokens(999), "999");
+        assert_eq!(fmt_tokens(1000), "1,000");
+        assert_eq!(fmt_tokens(12345), "12,345");
+        assert_eq!(fmt_tokens(1234567), "1,234,567");
     }
 }

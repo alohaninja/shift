@@ -433,3 +433,116 @@ fn test_real_image_size_reduction_economy() {
         original_size
     );
 }
+
+// ── Token savings integration tests ─────────────────────────────────
+
+#[test]
+fn test_image_metrics_populated_after_processing() {
+    let (_result, report) = process_fixture("openai_request.json", "openai", DriveMode::Balanced);
+
+    // image_metrics should have one entry per image found
+    assert_eq!(report.image_metrics.len(), report.images_found);
+    assert!(!report.image_metrics.is_empty());
+
+    let m = &report.image_metrics[0];
+    // Original dims should be non-zero
+    assert!(m.original_width > 0);
+    assert!(m.original_height > 0);
+    // Token estimates should be non-zero
+    assert!(m.tokens_before.openai_tokens > 0);
+    assert!(m.tokens_before.anthropic_tokens > 0);
+    assert!(m.tokens_after.openai_tokens > 0);
+    assert!(m.tokens_after.anthropic_tokens > 0);
+}
+
+#[test]
+fn test_token_savings_aggregated() {
+    let (_result, report) = process_fixture("openai_request.json", "openai", DriveMode::Balanced);
+
+    let ts = &report.token_savings;
+    // Aggregate should match sum of per-image metrics
+    let sum_openai_before: u64 = report
+        .image_metrics
+        .iter()
+        .map(|m| m.tokens_before.openai_tokens)
+        .sum();
+    let sum_openai_after: u64 = report
+        .image_metrics
+        .iter()
+        .map(|m| m.tokens_after.openai_tokens)
+        .sum();
+    assert_eq!(ts.openai_before, sum_openai_before);
+    assert_eq!(ts.openai_after, sum_openai_after);
+}
+
+#[test]
+fn test_image_metrics_tracks_resize() {
+    // The fixture has a 4000x3000 image that gets resized
+    let (_result, report) = process_fixture("openai_request.json", "openai", DriveMode::Balanced);
+
+    let m = &report.image_metrics[0];
+    // Original should be larger than transformed
+    assert!(
+        m.original_width > m.transformed_width || m.original_height > m.transformed_height,
+        "expected resize: {}x{} -> {}x{}",
+        m.original_width,
+        m.original_height,
+        m.transformed_width,
+        m.transformed_height
+    );
+}
+
+#[test]
+fn test_image_metrics_anthropic_provider() {
+    let (_result, report) =
+        process_fixture("anthropic_request.json", "anthropic", DriveMode::Balanced);
+
+    assert!(!report.image_metrics.is_empty());
+    let m = &report.image_metrics[0];
+    // Anthropic tokens should be populated
+    assert!(m.tokens_before.anthropic_tokens > 0);
+    assert!(m.tokens_after.anthropic_tokens > 0);
+}
+
+#[test]
+fn test_image_metrics_dry_run() {
+    let json_str = load_fixture("openai_request.json");
+    let payload: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    let config = ShiftConfig {
+        provider: "openai".to_string(),
+        mode: DriveMode::Balanced,
+        dry_run: true,
+        ..Default::default()
+    };
+    let (_result, report) = pipeline::process(&payload, &config).unwrap();
+
+    // Even in dry-run, metrics should be populated with estimated dims
+    assert!(!report.image_metrics.is_empty());
+    let m = &report.image_metrics[0];
+    assert!(m.original_width > 0);
+    assert!(m.tokens_before.openai_tokens > 0);
+}
+
+#[test]
+fn test_report_serializes_to_json() {
+    let (_result, report) = process_fixture("openai_request.json", "openai", DriveMode::Balanced);
+
+    // Report should serialize to valid JSON (for -o json-report)
+    let json = serde_json::to_string_pretty(&report).expect("report should serialize to JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json).expect("serialized report should parse back");
+
+    // Verify key fields exist
+    assert!(parsed["image_metrics"].is_array());
+    assert!(parsed["token_savings"].is_object());
+    assert!(parsed["token_savings"]["openai_before"].is_u64());
+    assert!(parsed["token_savings"]["anthropic_before"].is_u64());
+
+    // image_metrics should have nested token estimates
+    if let Some(first) = parsed["image_metrics"].as_array().and_then(|a| a.first()) {
+        assert!(first["tokens_before"]["openai_tokens"].is_u64());
+        assert!(first["tokens_before"]["anthropic_tokens"].is_u64());
+        assert!(first["original_width"].is_u64());
+        assert!(first["transformed_width"].is_u64());
+    }
+}
