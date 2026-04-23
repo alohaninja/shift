@@ -3,7 +3,13 @@
     ".": {
       "release-type": "rust",
       "bump-minor-pre-major": true,
-      "extra-files": []
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.workspace.package.version"
+        }
+      ]
     }
   }
 }
