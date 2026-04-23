@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/shift-icon.png" alt="SHIFT" width="200" />
+  <img src="https://raw.githubusercontent.com/alohaninja/shift/main/assets/shift-icon.png" alt="SHIFT" width="200" />
 </p>
 
 <h1 align="center">SHIFT</h1>
@@ -19,7 +19,7 @@
 SHIFT sits between your application and the model API. Every request passes through a pipeline that **inspects**, **evaluates**, and **transforms** media inputs so they conform to provider constraints.
 
 <p align="center">
-  <img src="assets/flow.svg" alt="SHIFT pipeline flow" width="900" />
+  <img src="https://raw.githubusercontent.com/alohaninja/shift/main/assets/flow.svg" alt="SHIFT pipeline flow" width="900" />
 </p>
 
 **Before SHIFT:** oversized images, unsupported formats, and bloated payloads cause hard failures (400 errors, token waste, session crashes).
