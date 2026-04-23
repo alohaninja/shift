@@ -1,9 +1,15 @@
 [package]
-name = "shift-core"
+name = "shift-preflight"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Multimodal preflight layer for AI model inputs"
+description = "Multimodal preflight layer for AI model inputs — inspect, transform, and optimize images before they reach the API"
+repository = "https://github.com/alohaninja/shift"
+homepage = "https://github.com/alohaninja/shift"
+keywords = ["ai", "openai", "anthropic", "image", "token"]
+categories = ["multimedia::images", "command-line-utilities"]
+readme = "../README.md"
+exclude = ["tests/"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -14,6 +20,9 @@ base64 = "0.22"
 anyhow = "1"
 ureq = "3"
 url = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

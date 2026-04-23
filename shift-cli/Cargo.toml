@@ -1,16 +1,22 @@
 [package]
-name = "shift-cli"
+name = "shift-preflight-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "CLI for SHIFT multimodal preflight layer"
+description = "CLI for SHIFT — transform images in AI model payloads to meet provider constraints"
+repository = "https://github.com/alohaninja/shift"
+homepage = "https://github.com/alohaninja/shift"
+keywords = ["ai", "openai", "anthropic", "cli", "token"]
+categories = ["command-line-utilities"]
+readme = "../README.md"
+exclude = ["tests/"]
 
 [[bin]]
-name = "shift"
+name = "shift-ai"
 path = "src/main.rs"
 
 [dependencies]
-shift-core = { path = "../shift-core" }
+shift-preflight = { path = "../shift-core", version = "0.1" }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"

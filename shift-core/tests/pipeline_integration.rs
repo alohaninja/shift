@@ -3,7 +3,7 @@
 //! These tests exercise the full pipeline end-to-end with real payloads
 //! loaded from tests/fixtures/.
 
-use shift_core::{pipeline, DriveMode, Report, ShiftConfig, SvgMode};
+use shift_preflight::{pipeline, DriveMode, Report, ShiftConfig, SvgMode};
 
 fn load_fixture(name: &str) -> String {
     let path = format!(

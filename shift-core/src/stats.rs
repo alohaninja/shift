@@ -9,6 +9,14 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
+/// Maximum number of records to load from the stats file.
+/// Prevents unbounded memory allocation from huge/malicious files.
+const MAX_STATS_RECORDS: usize = 100_000;
+
+/// Maximum line length (bytes) to accept when reading the stats file.
+/// Lines longer than this are skipped as likely corrupt.
+const MAX_LINE_LENGTH: usize = 65_536;
+
 use crate::cost::TokenSavings;
 
 /// A single run record persisted to the stats file.
@@ -24,6 +32,12 @@ pub struct RunRecord {
     pub images: usize,
     /// Number of images modified
     pub modified: usize,
+    /// Number of images dropped (economy mode excess, SVG source mode)
+    #[serde(default)]
+    pub dropped: usize,
+    /// Number of SVGs rasterized
+    #[serde(default)]
+    pub svgs_rasterized: usize,
     /// Byte sizes
     pub bytes_before: usize,
     pub bytes_after: usize,
@@ -116,23 +130,43 @@ pub fn record_run(record: &RunRecord, path: Option<&PathBuf>) -> Result<()> {
         }
     }
 
-    // Reject symlinks on the stats file itself
-    if stats_path.exists() {
-        let file_meta = fs::symlink_metadata(&stats_path)
-            .with_context(|| format!("failed to stat {}", stats_path.display()))?;
-        if file_meta.file_type().is_symlink() {
-            anyhow::bail!(
-                "stats file {} is a symlink (possible symlink attack)",
-                stats_path.display()
-            );
-        }
-    }
+    // Open the file with O_NOFOLLOW on Unix to atomically reject symlinks
+    // (avoids TOCTOU race between stat and open).
+    #[cfg(unix)]
+    let mut file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&stats_path)
+            .with_context(|| {
+                format!(
+                    "failed to open stats file: {} (symlinks are rejected)",
+                    stats_path.display()
+                )
+            })?
+    };
 
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&stats_path)
-        .with_context(|| format!("failed to open stats file: {}", stats_path.display()))?;
+    #[cfg(not(unix))]
+    let mut file = {
+        // Fallback: stat-then-open (TOCTOU risk, but best we can do on non-Unix)
+        if stats_path.exists() {
+            let file_meta = fs::symlink_metadata(&stats_path)
+                .with_context(|| format!("failed to stat {}", stats_path.display()))?;
+            if file_meta.file_type().is_symlink() {
+                anyhow::bail!(
+                    "stats file {} is a symlink (possible symlink attack)",
+                    stats_path.display()
+                );
+            }
+        }
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&stats_path)
+            .with_context(|| format!("failed to open stats file: {}", stats_path.display()))?
+    };
 
     // Serialize to a single buffer and write atomically to reduce interleave risk
     let mut line = serde_json::to_string(record).context("failed to serialize run record")?;
@@ -176,17 +210,35 @@ pub fn load_records(path: Option<&PathBuf>) -> Result<LoadResult> {
         if trimmed.is_empty() {
             continue;
         }
+        // Skip excessively long lines (likely corrupt)
+        if trimmed.len() > MAX_LINE_LENGTH {
+            eprintln!(
+                "shift-ai: warning: skipping oversized stats line {} ({} bytes)",
+                i + 1,
+                trimmed.len()
+            );
+            skipped_lines += 1;
+            continue;
+        }
         match serde_json::from_str::<RunRecord>(trimmed) {
             Ok(record) => records.push(record),
             Err(e) => {
                 // Skip malformed lines rather than failing
                 eprintln!(
-                    "shift: warning: skipping malformed stats line {}: {}",
+                    "shift-ai: warning: skipping malformed stats line {}: {}",
                     i + 1,
                     e
                 );
                 skipped_lines += 1;
             }
+        }
+        // Cap total records to prevent unbounded memory allocation
+        if records.len() >= MAX_STATS_RECORDS {
+            eprintln!(
+                "shift-ai: warning: stats file has >{} entries, loading only the first {}",
+                MAX_STATS_RECORDS, MAX_STATS_RECORDS
+            );
+            break;
         }
     }
 
@@ -258,7 +310,7 @@ pub fn record_from_report(report: &crate::report::Report, provider: &str) -> Run
     let minutes = (secs_today % 3600) / 60;
     let seconds = secs_today % 60;
 
-    // Simple date calculation (approximate, good enough for stats)
+    // Civil date calculation (Hinnant algorithm, exact for proleptic Gregorian calendar)
     let (year, month, day) = days_to_ymd(days_since_epoch);
 
     let timestamp = format!(
@@ -273,6 +325,8 @@ pub fn record_from_report(report: &crate::report::Report, provider: &str) -> Run
         provider: provider.to_string(),
         images: report.images_found,
         modified: report.images_modified,
+        dropped: report.images_dropped,
+        svgs_rasterized: report.svgs_rasterized,
         bytes_before: report.original_size,
         bytes_after: report.transformed_size,
         token_savings: report.token_savings.clone(),
@@ -308,6 +362,8 @@ mod tests {
             provider: "openai".to_string(),
             images: 3,
             modified: 2,
+            dropped: 0,
+            svgs_rasterized: 0,
             bytes_before: 5_000_000,
             bytes_after: 1_000_000,
             token_savings: TokenSavings {

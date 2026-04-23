@@ -975,28 +975,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "shift-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "serde_json",
- "shift-core",
-]
-
-[[package]]
-name = "shift-core"
-version = "0.1.0"
+name = "shift-preflight"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "base64",
  "image",
+ "libc",
  "resvg",
  "serde",
  "serde_json",
  "tempfile",
  "ureq",
  "url",
+]
+
+[[package]]
+name = "shift-preflight-cli"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde_json",
+ "shift-preflight",
 ]
 
 [[package]]

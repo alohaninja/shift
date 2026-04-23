@@ -79,7 +79,10 @@ impl Report {
         self.token_savings = TokenSavings::from_metrics(&self.image_metrics);
     }
 
-    /// Size reduction as a percentage.
+    /// Size change as a percentage.
+    ///
+    /// Positive values indicate reduction (smaller output).
+    /// Negative values indicate the output grew (e.g., format conversion).
     pub fn size_reduction_pct(&self) -> f64 {
         if self.original_size == 0 {
             return 0.0;
@@ -100,7 +103,14 @@ impl Default for Report {
     }
 }
 
-/// Format a token count with thousands separators.
+/// Format a token count with comma thousands separators.
+///
+/// # Examples
+/// ```
+/// # use shift_preflight::report::fmt_tokens;
+/// assert_eq!(fmt_tokens(1234567), "1,234,567");
+/// assert_eq!(fmt_tokens(42), "42");
+/// ```
 pub fn fmt_tokens(n: u64) -> String {
     if n < 1_000 {
         return n.to_string();
@@ -133,7 +143,12 @@ impl fmt::Display for Report {
         writeln!(f, "Original size:     {} bytes", self.original_size)?;
         writeln!(f, "Transformed size:  {} bytes", self.transformed_size)?;
         if self.original_size > 0 {
-            writeln!(f, "Size reduction:    {:.1}%", self.size_reduction_pct())?;
+            let pct = self.size_reduction_pct();
+            if pct >= 0.0 {
+                writeln!(f, "Size reduction:    {:.1}%", pct)?;
+            } else {
+                writeln!(f, "Size increased:    {:.1}%", pct.abs())?;
+            }
         }
 
         // Token savings section
