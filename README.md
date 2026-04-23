@@ -97,15 +97,45 @@ Use `shift gain --format json` for machine-readable output.
 
 ## Install
 
+### From source (recommended)
+
 ```bash
+# Clone and install the CLI globally
+git clone https://github.com/alohaninja/shift.git
+cd shift
 cargo install --path shift-cli
 ```
 
-Or build from source:
+### From GitHub (no clone needed)
 
 ```bash
+cargo install --git https://github.com/alohaninja/shift shift-cli
+```
+
+### Build without installing
+
+```bash
+git clone https://github.com/alohaninja/shift.git
+cd shift
 cargo build --release
 # Binary at target/release/shift
+```
+
+### Pre-built binaries
+
+Download from [GitHub Releases](https://github.com/alohaninja/shift/releases) — macOS (x86/arm) and Linux (x86/arm).
+
+### Verify installation
+
+```bash
+shift --version
+shift --help
+
+# Quick validation — transform a sample payload
+echo '{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}' | shift
+
+# Check stats tracking
+shift gain
 ```
 
 ## Quick start

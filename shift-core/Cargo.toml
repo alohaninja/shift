@@ -3,7 +3,12 @@ name = "shift-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Multimodal preflight layer for AI model inputs"
+description = "Multimodal preflight layer for AI model inputs — inspect, transform, and optimize images before they reach the API"
+repository = "https://github.com/alohaninja/shift"
+homepage = "https://github.com/alohaninja/shift"
+keywords = ["ai", "openai", "anthropic", "image", "token"]
+categories = ["multimedia::images", "command-line-utilities"]
+readme = "../README.md"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
