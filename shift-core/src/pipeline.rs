@@ -201,6 +201,7 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
         let mut was_modified = false;
         let mut output_mime = meta.format.mime_type().to_string();
         let mut was_dropped = false;
+        let mut did_jpeg_resize = false;
 
         for action in &actions {
             match action {
@@ -213,6 +214,13 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
                     was_dropped = true;
                     break;
                 }
+                policy::Action::Recompress { .. } if did_jpeg_resize => {
+                    // Skip: Resize already re-encoded as JPEG. A second
+                    // lossy encode would introduce unnecessary generational
+                    // quality loss without meaningful size benefit.
+                    let detail = "skipped: resize already produced JPEG".to_string();
+                    report.add_action(extracted.global_index, "skip_recompress", &detail);
+                }
                 _ => {
                     if !config.dry_run {
                         let new_data = transformer::transform_image(&current_data, action)?;
@@ -221,24 +229,9 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
                         current_data = new_data;
                         was_modified = true;
 
-                        // Update mime type based on action
-                        match action {
-                            policy::Action::ConvertFormat { to } => {
-                                output_mime = format!("image/{}", to);
-                            }
-                            policy::Action::Resize { .. } => {
-                                // Resize preserves the input format for JPEG;
-                                // other formats are encoded as PNG.
-                                if meta.format == MediaFormat::Jpeg {
-                                    output_mime = "image/jpeg".to_string();
-                                } else {
-                                    output_mime = "image/png".to_string();
-                                }
-                            }
-                            policy::Action::Recompress { .. } => {
-                                output_mime = "image/jpeg".to_string();
-                            }
-                            _ => {}
+                        if matches!(action, policy::Action::Resize { .. }) {
+                            did_jpeg_resize =
+                                inspector::detect_format(&current_data) == MediaFormat::Jpeg;
                         }
                     } else {
                         let detail = describe_action(action, &meta);
@@ -248,6 +241,37 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
                             &detail,
                         );
                         was_modified = true;
+
+                        // Dry-run: predict that resize of JPEG input stays JPEG
+                        if matches!(action, policy::Action::Resize { .. })
+                            && meta.format == MediaFormat::Jpeg
+                        {
+                            did_jpeg_resize = true;
+                        }
+                    }
+
+                    // Update output MIME based on the actual output format.
+                    // Derived from the transformed bytes when available,
+                    // falling back to metadata for dry-run.
+                    match action {
+                        policy::Action::ConvertFormat { to } => {
+                            output_mime = format!("image/{}", to);
+                        }
+                        policy::Action::Resize { .. } => {
+                            if !config.dry_run {
+                                // Use actual output format, not original metadata
+                                let actual = inspector::detect_format(&current_data);
+                                output_mime = actual.mime_type().to_string();
+                            } else if meta.format == MediaFormat::Jpeg {
+                                output_mime = "image/jpeg".to_string();
+                            } else {
+                                output_mime = "image/png".to_string();
+                            }
+                        }
+                        policy::Action::Recompress { .. } => {
+                            output_mime = "image/jpeg".to_string();
+                        }
+                        _ => {}
                     }
                 }
             }

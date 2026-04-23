@@ -6,6 +6,10 @@ use image::{DynamicImage, ImageEncoder};
 
 use crate::policy::Action;
 
+/// Default JPEG quality for format-preserving operations (resize, convert).
+/// The Recompress action has its own policy-driven quality.
+const DEFAULT_JPEG_QUALITY: u8 = 85;
+
 /// Apply a transformation action to raw image bytes.
 ///
 /// Returns the transformed image bytes.
@@ -84,7 +88,7 @@ fn resize_image(data: &[u8], target_width: u32, target_height: u32) -> Result<Ve
     let resized = img.resize(target_width, target_height, FilterType::Lanczos3);
 
     match input_format {
-        crate::inspector::MediaFormat::Jpeg => encode_jpeg(&resized, 85),
+        crate::inspector::MediaFormat::Jpeg => encode_jpeg(&resized, DEFAULT_JPEG_QUALITY),
         _ => encode_png(&resized),
     }
 }
@@ -92,20 +96,7 @@ fn resize_image(data: &[u8], target_width: u32, target_height: u32) -> Result<Ve
 /// Recompress an image as JPEG at the given quality.
 fn recompress_jpeg(data: &[u8], quality: u8) -> Result<Vec<u8>> {
     let img = load_image_safe(data)?;
-
-    let rgb = img.to_rgb8();
-    let mut buf = Vec::new();
-    let encoder = JpegEncoder::new_with_quality(&mut buf, quality);
-    encoder
-        .write_image(
-            rgb.as_raw(),
-            rgb.width(),
-            rgb.height(),
-            image::ExtendedColorType::Rgb8,
-        )
-        .context("failed to encode JPEG")?;
-
-    Ok(buf)
+    encode_jpeg(&img, quality)
 }
 
 /// Convert an image to a different format.
@@ -114,20 +105,7 @@ fn convert_format(data: &[u8], to: &str) -> Result<Vec<u8>> {
 
     match to {
         "png" => encode_png(&img),
-        "jpeg" | "jpg" => {
-            let rgb = img.to_rgb8();
-            let mut buf = Vec::new();
-            let encoder = JpegEncoder::new_with_quality(&mut buf, 85);
-            encoder
-                .write_image(
-                    rgb.as_raw(),
-                    rgb.width(),
-                    rgb.height(),
-                    image::ExtendedColorType::Rgb8,
-                )
-                .context("failed to encode JPEG")?;
-            Ok(buf)
-        }
+        "jpeg" | "jpg" => encode_jpeg(&img, DEFAULT_JPEG_QUALITY),
         _ => anyhow::bail!("unsupported target format: {}", to),
     }
 }
@@ -242,7 +220,14 @@ mod tests {
         };
         let result = transform_image(&data, &action).unwrap();
 
-        // Verify it's still a valid image
+        // Must still be PNG after resize
+        assert_eq!(
+            detect_format(&result),
+            MediaFormat::Png,
+            "resized PNG should remain PNG"
+        );
+
+        // Verify it's still a valid image with correct dimensions
         let img = image::load_from_memory(&result).unwrap();
         assert!(img.width() <= 2048);
         assert!(img.height() <= 2048);
@@ -266,6 +251,14 @@ mod tests {
             detect_format(&result),
             MediaFormat::Jpeg,
             "resized JPEG should remain JPEG, not be converted to PNG"
+        );
+
+        // Resized JPEG should be smaller than the original
+        assert!(
+            result.len() <= data.len(),
+            "resized JPEG ({} bytes) should not be larger than original ({} bytes)",
+            result.len(),
+            data.len()
         );
 
         // Verify dimensions are within the target
