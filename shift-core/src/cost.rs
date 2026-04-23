@@ -87,12 +87,18 @@ impl TokenSavings {
 
 /// OpenAI vision token count for `detail: high`.
 ///
-/// Algorithm (from OpenAI docs):
+/// Algorithm (from OpenAI docs, tile-based family):
 /// 1. Scale image so shortest side = 768px (only if larger)
 /// 2. Split into 512×512 tiles (ceiling)
 /// 3. Each tile = 170 tokens + 85 base tokens
 ///
 /// For `detail: low`: fixed 85 tokens.
+///
+/// **Note:** This implements the tile-based formula for GPT-4o, GPT-4.1,
+/// GPT-4o-mini, and o-series models (except o4-mini). Newer models
+/// (GPT-4.1 2025-04-14+, o4-mini) use patch-based tokenization with
+/// different budgets. Pass-through accuracy for those models is not
+/// guaranteed.
 pub fn openai_tokens(width: u32, height: u32) -> u64 {
     if width == 0 || height == 0 {
         return 0;
@@ -139,7 +145,7 @@ pub fn openai_tokens_low() -> u64 {
 
 // ── Anthropic token estimation ───────────────────────────────────────
 
-/// Anthropic vision token count.
+/// Anthropic vision token count for standard-resolution models.
 ///
 /// Formula (from Anthropic docs):
 ///   tokens ≈ (width × height) / 750
@@ -147,6 +153,11 @@ pub fn openai_tokens_low() -> u64 {
 /// Images are first downscaled so the long edge ≤ 1568px (standard models)
 /// and then padded to a multiple of 28px.
 /// Max tokens per image: 1568 (standard) or 4784 (Opus 4.7).
+///
+/// **Note:** This implements the standard-resolution formula (1568px max
+/// long edge, 1568 token cap). Claude Opus 4.7 supports high-resolution
+/// images (2576px long edge, 4784 token cap). Estimates for Opus 4.7
+/// payloads with large images will be under-counted.
 pub fn anthropic_tokens(width: u32, height: u32) -> u64 {
     if width == 0 || height == 0 {
         return 0;

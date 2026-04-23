@@ -37,7 +37,7 @@ SHIFT estimates per-provider token savings for every run. Both OpenAI and Anthro
 | 1254×1254 app icon (economy) | 1254×1254 | 1024×1024 | 765 → 765 | 1,568 → 1,405 (−10%) |
 | SVG diagram → rasterized PNG | SVG | 512×256 PNG | 255 → 255 | 0 → 98 |
 
-*Token estimates based on published provider formulas. OpenAI uses tile-based counting (512×512 tiles); Anthropic uses pixel-based (`w×h/750`). Actual billing may vary by model.*
+*Token estimates based on published provider formulas. OpenAI uses tile-based counting (GPT-4o/4.1 family, 512×512 tiles); Anthropic uses pixel-based (`w×h/750`, 1568px long-edge cap for standard models). Actual billing may vary by model — newer OpenAI models use patch-based counting, and Anthropic Opus 4.7 supports higher resolution (2576px, 4784 max tokens).*
 
 ### Sample report
 
@@ -53,8 +53,8 @@ Transformed size:  17018 bytes
 Size reduction:    59.7%
 
 Token Savings (estimated):
-  OpenAI:    765 -> 765 tokens  (-0.0%)
-  Anthropic: 1,568 -> 1,082 tokens  (-31.0%)
+  OpenAI:    765 -> 765 tokens  (0.0% saved)
+  Anthropic: 1,568 -> 1,082 tokens  (31.0% saved)
 
 Per-image breakdown:
   [0] 4000x3000 -> 1024x768  (OpenAI: 765 -> 765, Anthropic: 1,568 -> 1,082)

@@ -106,6 +106,22 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
                     payload::ImageRef::Base64 { media_type, .. } => media_type.clone(),
                     payload::ImageRef::Url(_) => "application/octet-stream".to_string(),
                 };
+                let orig_bytes = extracted.data.len();
+                let format_short = mime_to_short(&original_mime);
+                // Record metrics for skipped images (0x0 = unknown dims)
+                report.add_image_metrics(ImageMetrics {
+                    image_index: extracted.global_index,
+                    original_width: 0,
+                    original_height: 0,
+                    transformed_width: 0,
+                    transformed_height: 0,
+                    original_bytes: orig_bytes,
+                    transformed_bytes: orig_bytes,
+                    format_before: format_short.clone(),
+                    format_after: format_short,
+                    tokens_before: estimate_tokens(0, 0),
+                    tokens_after: estimate_tokens(0, 0),
+                });
                 // Push original data through unchanged
                 transformed_images.push((
                     extracted.global_index,

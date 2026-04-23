@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use shift_core::report::fmt_tokens;
 use shift_core::{DriveMode, ShiftConfig, SvgMode};
 use std::io::{IsTerminal, Read};
 
@@ -142,9 +143,7 @@ fn run() -> Result<()> {
     if !cli.no_stats && !cli.dry_run && report.images_found > 0 {
         let record = shift_core::stats::record_from_report(&report, &provider);
         if let Err(e) = shift_core::stats::record_run(&record, None) {
-            if cli.verbose {
-                eprintln!("shift: warning: failed to save stats: {}", e);
-            }
+            eprintln!("shift: warning: failed to save stats: {}", e);
         }
     }
 
@@ -177,7 +176,8 @@ fn run() -> Result<()> {
 }
 
 fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
-    let records = shift_core::stats::load_records(None)?;
+    let load_result = shift_core::stats::load_records(None)?;
+    let records = load_result.records;
 
     if records.is_empty() {
         println!("No SHIFT runs recorded yet. Stats are saved automatically after each run.");
@@ -246,6 +246,12 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
                 summary.total_images, summary.total_modified
             );
             println!("Bytes:    {} saved", fmt_bytes(summary.bytes_saved()));
+            if load_result.skipped_lines > 0 {
+                println!(
+                    "Warning:  {} corrupted stats line(s) skipped",
+                    load_result.skipped_lines
+                );
+            }
             println!();
             println!("Token Savings (estimated):");
             if summary.total_openai_before > 0 {
@@ -268,21 +274,6 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn fmt_tokens(n: u64) -> String {
-    if n < 1_000 {
-        return n.to_string();
-    }
-    let s = n.to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    result.chars().rev().collect()
 }
 
 fn fmt_bytes(n: u64) -> String {

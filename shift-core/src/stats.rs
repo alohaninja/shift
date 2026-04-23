@@ -104,6 +104,28 @@ pub fn record_run(record: &RunRecord, path: Option<&PathBuf>) -> Result<()> {
     // Ensure parent directory exists
     if let Some(parent) = stats_path.parent() {
         fs::create_dir_all(parent).context("failed to create ~/.shift directory")?;
+
+        // Reject symlinks on the directory (consistent with pipeline.rs profile path validation)
+        let dir_meta = fs::symlink_metadata(parent)
+            .with_context(|| format!("failed to stat {}", parent.display()))?;
+        if dir_meta.file_type().is_symlink() {
+            anyhow::bail!(
+                "stats directory {} is a symlink (possible symlink attack)",
+                parent.display()
+            );
+        }
+    }
+
+    // Reject symlinks on the stats file itself
+    if stats_path.exists() {
+        let file_meta = fs::symlink_metadata(&stats_path)
+            .with_context(|| format!("failed to stat {}", stats_path.display()))?;
+        if file_meta.file_type().is_symlink() {
+            anyhow::bail!(
+                "stats file {} is a symlink (possible symlink attack)",
+                stats_path.display()
+            );
+        }
     }
 
     let mut file = fs::OpenOptions::new()
@@ -112,27 +134,41 @@ pub fn record_run(record: &RunRecord, path: Option<&PathBuf>) -> Result<()> {
         .open(&stats_path)
         .with_context(|| format!("failed to open stats file: {}", stats_path.display()))?;
 
-    let line = serde_json::to_string(record).context("failed to serialize run record")?;
-    writeln!(file, "{}", line).context("failed to write to stats file")?;
+    // Serialize to a single buffer and write atomically to reduce interleave risk
+    let mut line = serde_json::to_string(record).context("failed to serialize run record")?;
+    line.push('\n');
+    file.write_all(line.as_bytes())
+        .context("failed to write to stats file")?;
+    file.flush().context("failed to flush stats file")?;
 
     Ok(())
 }
 
+/// Result of loading stats records, including count of skipped malformed lines.
+pub struct LoadResult {
+    pub records: Vec<RunRecord>,
+    pub skipped_lines: usize,
+}
+
 /// Load all run records from the stats file.
-pub fn load_records(path: Option<&PathBuf>) -> Result<Vec<RunRecord>> {
+pub fn load_records(path: Option<&PathBuf>) -> Result<LoadResult> {
     let stats_path = match path {
         Some(p) => p.clone(),
         None => default_stats_path()?,
     };
 
     if !stats_path.exists() {
-        return Ok(Vec::new());
+        return Ok(LoadResult {
+            records: Vec::new(),
+            skipped_lines: 0,
+        });
     }
 
     let file = fs::File::open(&stats_path)
         .with_context(|| format!("failed to open stats file: {}", stats_path.display()))?;
     let reader = BufReader::new(file);
     let mut records = Vec::new();
+    let mut skipped_lines = 0;
 
     for (i, line) in reader.lines().enumerate() {
         let line = line.with_context(|| format!("failed to read line {} of stats file", i + 1))?;
@@ -149,11 +185,15 @@ pub fn load_records(path: Option<&PathBuf>) -> Result<Vec<RunRecord>> {
                     i + 1,
                     e
                 );
+                skipped_lines += 1;
             }
         }
     }
 
-    Ok(records)
+    Ok(LoadResult {
+        records,
+        skipped_lines,
+    })
 }
 
 /// Compute aggregate gain summary from records.
@@ -290,25 +330,28 @@ mod tests {
         record_run(&r1, Some(&path)).unwrap();
         record_run(&r2, Some(&path)).unwrap();
 
-        let records = load_records(Some(&path)).unwrap();
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].date, "2026-04-20");
-        assert_eq!(records[1].date, "2026-04-21");
+        let result = load_records(Some(&path)).unwrap();
+        assert_eq!(result.records.len(), 2);
+        assert_eq!(result.skipped_lines, 0);
+        assert_eq!(result.records[0].date, "2026-04-20");
+        assert_eq!(result.records[1].date, "2026-04-21");
     }
 
     #[test]
     fn test_load_empty_file() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_path_buf();
-        let records = load_records(Some(&path)).unwrap();
-        assert!(records.is_empty());
+        let result = load_records(Some(&path)).unwrap();
+        assert!(result.records.is_empty());
+        assert_eq!(result.skipped_lines, 0);
     }
 
     #[test]
     fn test_load_nonexistent_file() {
         let path = PathBuf::from("/tmp/shift-test-nonexistent-stats.jsonl");
-        let records = load_records(Some(&path)).unwrap();
-        assert!(records.is_empty());
+        let result = load_records(Some(&path)).unwrap();
+        assert!(result.records.is_empty());
+        assert_eq!(result.skipped_lines, 0);
     }
 
     #[test]
@@ -377,8 +420,9 @@ mod tests {
         // Write another valid record
         record_run(&r, Some(&path)).unwrap();
 
-        let records = load_records(Some(&path)).unwrap();
-        assert_eq!(records.len(), 2); // only the 2 valid records
+        let result = load_records(Some(&path)).unwrap();
+        assert_eq!(result.records.len(), 2); // only the 2 valid records
+        assert_eq!(result.skipped_lines, 2); // 2 malformed lines skipped
     }
 
     #[test]
@@ -405,11 +449,104 @@ mod tests {
 
     #[test]
     fn test_days_to_ymd() {
-        // 2026-04-22 is day 20565 since epoch (approx)
-        // Just verify it produces something reasonable
-        let (y, m, d) = days_to_ymd(0); // 1970-01-01
-        assert_eq!(y, 1970);
-        assert_eq!(m, 1);
-        assert_eq!(d, 1);
+        // Unix epoch
+        let (y, m, d) = days_to_ymd(0);
+        assert_eq!((y, m, d), (1970, 1, 1));
+
+        // Leap year: 2000-02-29 = day 11016
+        let (y, m, d) = days_to_ymd(11016);
+        assert_eq!((y, m, d), (2000, 2, 29));
+
+        // Day after leap day: 2000-03-01 = day 11017
+        let (y, m, d) = days_to_ymd(11017);
+        assert_eq!((y, m, d), (2000, 3, 1));
+
+        // Non-leap century year: 2100-02-28 = day 47540
+        let (y, m, d) = days_to_ymd(47540);
+        assert_eq!((y, m, d), (2100, 2, 28));
+
+        // 2100-03-01 = day 47541 (no Feb 29 in 2100)
+        let (y, m, d) = days_to_ymd(47541);
+        assert_eq!((y, m, d), (2100, 3, 1));
+
+        // Year boundary: 2025-12-31 = day 20453
+        let (y, m, d) = days_to_ymd(20453);
+        assert_eq!((y, m, d), (2025, 12, 31));
+
+        // 2026-01-01 = day 20454
+        let (y, m, d) = days_to_ymd(20454);
+        assert_eq!((y, m, d), (2026, 1, 1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_symlink_directory_rejected() {
+        use std::os::unix::fs as unix_fs;
+
+        let real_dir = tempfile::tempdir().unwrap();
+        let symlink_dir = tempfile::tempdir().unwrap();
+        let symlink_path = symlink_dir.path().join("symlinked-shift");
+
+        // Create symlink to real directory
+        unix_fs::symlink(real_dir.path(), &symlink_path).unwrap();
+
+        let stats_file = symlink_path.join("stats.jsonl");
+        let r = make_record("2026-04-22", 100, 50);
+        let result = record_run(&r, Some(&stats_file));
+
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("symlink"),
+            "expected symlink error, got: {}",
+            err_msg
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_symlink_file_rejected() {
+        use std::os::unix::fs as unix_fs;
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let real_file = tmp_dir.path().join("real-stats.jsonl");
+        let symlink_file = tmp_dir.path().join("stats.jsonl");
+
+        // Create the real file
+        fs::write(&real_file, "").unwrap();
+        // Create symlink pointing to real file
+        unix_fs::symlink(&real_file, &symlink_file).unwrap();
+
+        let r = make_record("2026-04-22", 100, 50);
+        let result = record_run(&r, Some(&symlink_file));
+
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("symlink"),
+            "expected symlink error, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_skipped_lines_counted() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+
+        let r = make_record("2026-04-22", 500, 200);
+        record_run(&r, Some(&path)).unwrap();
+
+        // Append 3 garbage lines
+        let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        writeln!(f, "garbage1").unwrap();
+        writeln!(f, "garbage2").unwrap();
+        writeln!(f, "garbage3").unwrap();
+
+        record_run(&r, Some(&path)).unwrap();
+
+        let result = load_records(Some(&path)).unwrap();
+        assert_eq!(result.records.len(), 2);
+        assert_eq!(result.skipped_lines, 3);
     }
 }

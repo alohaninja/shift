@@ -101,7 +101,7 @@ impl Default for Report {
 }
 
 /// Format a token count with thousands separators.
-fn fmt_tokens(n: u64) -> String {
+pub fn fmt_tokens(n: u64) -> String {
     if n < 1_000 {
         return n.to_string();
     }
@@ -144,19 +144,19 @@ impl fmt::Display for Report {
             if ts.openai_before > 0 {
                 writeln!(
                     f,
-                    "  OpenAI:    {} -> {} tokens  ({:.1}%)",
+                    "  OpenAI:    {} -> {} tokens  ({:.1}% saved)",
                     fmt_tokens(ts.openai_before),
                     fmt_tokens(ts.openai_after),
-                    -ts.openai_pct()
+                    ts.openai_pct()
                 )?;
             }
             if ts.anthropic_before > 0 {
                 writeln!(
                     f,
-                    "  Anthropic: {} -> {} tokens  ({:.1}%)",
+                    "  Anthropic: {} -> {} tokens  ({:.1}% saved)",
                     fmt_tokens(ts.anthropic_before),
                     fmt_tokens(ts.anthropic_after),
-                    -ts.anthropic_pct()
+                    ts.anthropic_pct()
                 )?;
             }
         }
