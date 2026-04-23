@@ -976,7 +976,7 @@ dependencies = [
 
 [[package]]
 name = "shift-preflight"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "base64",
@@ -992,10 +992,11 @@ dependencies = [
 
 [[package]]
 name = "shift-preflight-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "clap",
+ "serde",
  "serde_json",
  "shift-preflight",
 ]

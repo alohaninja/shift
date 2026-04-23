@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 use shift_preflight::report::fmt_tokens;
-use shift_preflight::{DriveMode, ShiftConfig, SvgMode};
+use shift_preflight::{DriveMode, ImageMetrics, ShiftConfig, SvgMode, TokenSavings};
 use std::io::{IsTerminal, Read};
 
 /// SHIFT — Smart Hybrid Input Filtering & Transformation
@@ -75,6 +76,58 @@ enum Commands {
         #[arg(long, value_parser = ["json"])]
         format: Option<String>,
     },
+
+    /// Validate payload and preview image optimizations without transforming
+    ///
+    /// Runs the full inspection pipeline in dry-run mode and outputs a
+    /// structured JSON report with environment checks, per-image analysis,
+    /// token estimates, and optimization recommendations.
+    Preflight {
+        /// Input file (JSON request payload). Reads stdin if omitted.
+        #[arg()]
+        file: Option<String>,
+
+        /// Target provider
+        #[arg(short, long, default_value = "openai", value_parser = ["openai", "anthropic", "claude"])]
+        provider: String,
+
+        /// Drive mode
+        #[arg(short, long, default_value = "balanced", value_parser = ["performance", "perf", "balanced", "bal", "economy", "eco"])]
+        mode: String,
+
+        /// Target model (overrides model in payload)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Custom provider profile JSON file
+        #[arg(long)]
+        profile: Option<String>,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
+    },
+}
+
+/// Structured preflight report output (JSON to stdout).
+#[derive(Debug, Serialize)]
+struct PreflightReport {
+    shift_version: String,
+    provider: String,
+    model_detected: Option<String>,
+    mode: String,
+    api_key_present: bool,
+    api_key_env_var: String,
+    images_found: usize,
+    images_needing_transform: usize,
+    images_ok: usize,
+    total_original_bytes: usize,
+    estimated_transformed_bytes: usize,
+    estimated_byte_savings_pct: f64,
+    token_estimate: TokenSavings,
+    images: Vec<ImageMetrics>,
+    warnings: Vec<String>,
+    recommendations: Vec<String>,
 }
 
 /// Maximum stdin input size: 500 MB
@@ -94,6 +147,21 @@ fn run() -> Result<()> {
     if let Some(cmd) = &cli.command {
         return match cmd {
             Commands::Gain { daily, format } => run_gain(*daily, format.as_deref()),
+            Commands::Preflight {
+                file,
+                provider,
+                mode,
+                model,
+                profile,
+                verbose,
+            } => run_preflight(
+                file,
+                provider,
+                mode,
+                model.as_deref(),
+                profile.as_deref(),
+                *verbose,
+            ),
         };
     }
 
@@ -171,6 +239,148 @@ fn run() -> Result<()> {
         }
         _ => unreachable!(),
     }
+
+    Ok(())
+}
+
+fn run_preflight(
+    file: &Option<String>,
+    provider: &str,
+    mode: &str,
+    model: Option<&str>,
+    profile: Option<&str>,
+    verbose: bool,
+) -> Result<()> {
+    // 1. Read input
+    let input = read_input(file)?;
+    let payload: serde_json::Value =
+        serde_json::from_str(&input).context("failed to parse input as JSON")?;
+
+    // 2. Resolve provider
+    let provider = if provider == "claude" {
+        "anthropic"
+    } else {
+        provider
+    };
+
+    // 3. Detect model from payload if not overridden
+    let model_detected = model.map(String::from).or_else(|| {
+        payload
+            .get("model")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+    });
+
+    // 4. Check API key
+    let api_key_env_var = match provider {
+        "anthropic" => "ANTHROPIC_API_KEY",
+        _ => "OPENAI_API_KEY",
+    };
+    let api_key_present = std::env::var(api_key_env_var).is_ok();
+
+    // 5. Build config and run dry-run pipeline
+    let drive_mode: DriveMode = mode.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+    let config = ShiftConfig {
+        mode: drive_mode,
+        svg_mode: SvgMode::Raster,
+        provider: provider.to_string(),
+        model: model.map(String::from),
+        dry_run: true,
+        verbose,
+        profile_path: profile.map(String::from),
+        limits: shift_preflight::SafetyLimits::default(),
+    };
+
+    let (_result, report) = shift_preflight::process(&payload, &config)?;
+
+    // 6. Compute images needing transform vs ok
+    let images_needing_transform = report
+        .image_metrics
+        .iter()
+        .filter(|m| {
+            m.original_width != m.transformed_width
+                || m.original_height != m.transformed_height
+                || m.format_before != m.format_after
+        })
+        .count();
+    let images_ok = report.images_found.saturating_sub(images_needing_transform);
+
+    // 7. Compute byte savings percentage
+    let estimated_byte_savings_pct = if report.original_size > 0 {
+        let diff = report.original_size as f64 - report.transformed_size as f64;
+        (diff / report.original_size as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    // 8. Build recommendations
+    let mut recommendations = Vec::new();
+
+    if !api_key_present {
+        recommendations.push(format!(
+            "Set {} environment variable before sending API requests",
+            api_key_env_var
+        ));
+    }
+
+    if images_needing_transform > 0 && drive_mode != DriveMode::Economy {
+        // Estimate what economy mode would save
+        let eco_config = ShiftConfig {
+            mode: DriveMode::Economy,
+            ..config.clone()
+        };
+        if let Ok((_eco_result, eco_report)) = shift_preflight::process(&payload, &eco_config) {
+            let current_anthropic = report.token_savings.anthropic_after;
+            let eco_anthropic = eco_report.token_savings.anthropic_after;
+            if eco_anthropic < current_anthropic {
+                let extra_pct = if current_anthropic > 0 {
+                    ((current_anthropic - eco_anthropic) as f64 / current_anthropic as f64) * 100.0
+                } else {
+                    0.0
+                };
+                recommendations.push(format!(
+                    "Economy mode would save an additional {:.0}% Anthropic tokens ({} -> {} tokens)",
+                    extra_pct,
+                    fmt_tokens(current_anthropic),
+                    fmt_tokens(eco_anthropic),
+                ));
+            }
+        }
+    }
+
+    if report.images_found == 0 {
+        recommendations
+            .push("No images found in payload — shift-ai optimization not needed".to_string());
+    }
+
+    if images_needing_transform == 0 && report.images_found > 0 {
+        recommendations.push(
+            "All images are within provider constraints — no optimization needed".to_string(),
+        );
+    }
+
+    // 9. Build and output the preflight report
+    let preflight = PreflightReport {
+        shift_version: env!("CARGO_PKG_VERSION").to_string(),
+        provider: provider.to_string(),
+        model_detected,
+        mode: format!("{}", drive_mode),
+        api_key_present,
+        api_key_env_var: api_key_env_var.to_string(),
+        images_found: report.images_found,
+        images_needing_transform,
+        images_ok,
+        total_original_bytes: report.original_size,
+        estimated_transformed_bytes: report.transformed_size,
+        estimated_byte_savings_pct,
+        token_estimate: report.token_savings,
+        images: report.image_metrics,
+        warnings: report.warnings,
+        recommendations,
+    };
+
+    let json = serde_json::to_string_pretty(&preflight)?;
+    println!("{}", json);
 
     Ok(())
 }
