@@ -46,7 +46,9 @@ else
 fi
 
 ARCHIVE="shift-${TARGET}.tar.gz"
-URL="https://github.com/${REPO}/releases/latest/download/${ARCHIVE}"
+BASE_URL="https://github.com/${REPO}/releases/latest/download"
+URL="${BASE_URL}/${ARCHIVE}"
+CHECKSUMS_URL="${BASE_URL}/checksums.txt"
 
 echo "Detected: ${TARGET}"
 echo "Downloading: ${URL}"
@@ -59,14 +61,29 @@ TMPDIR="$(mktemp -d)"
 trap 'rm -rf "${TMPDIR}"' EXIT
 
 curl -fSL "${URL}" -o "${TMPDIR}/${ARCHIVE}"
-tar xzf "${TMPDIR}/${ARCHIVE}" -C "${TMPDIR}"
+
+# Verify checksum if sha256sum or shasum is available
+curl -fSL "${CHECKSUMS_URL}" -o "${TMPDIR}/checksums.txt" 2>/dev/null && {
+  if command -v sha256sum &>/dev/null; then
+    (cd "${TMPDIR}" && sha256sum -c <(grep "${ARCHIVE}" checksums.txt))
+  elif command -v shasum &>/dev/null; then
+    (cd "${TMPDIR}" && shasum -a 256 -c <(grep "${ARCHIVE}" checksums.txt))
+  else
+    echo "Warning: sha256sum/shasum not found, skipping checksum verification" >&2
+  fi
+} || {
+  echo "Warning: could not download checksums.txt, skipping verification" >&2
+}
+
+# Extract only the expected file (defense against path traversal)
+tar xzf "${TMPDIR}/${ARCHIVE}" -C "${TMPDIR}" shift
 install -m 755 "${TMPDIR}/shift" "${INSTALL_DIR}/shift"
 
 echo "Installed shift to ${INSTALL_DIR}/shift"
 
-# Verify
-if command -v shift &>/dev/null; then
-  shift --version
+# Verify using the full path (avoid bash builtin collision)
+if "${INSTALL_DIR}/shift" --version 2>/dev/null; then
+  echo "Verified installation."
 else
   echo ""
   echo "Add ${INSTALL_DIR} to your PATH:"

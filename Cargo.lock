@@ -991,6 +991,7 @@ dependencies = [
  "anyhow",
  "base64",
  "image",
+ "libc",
  "resvg",
  "serde",
  "serde_json",

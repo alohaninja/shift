@@ -5,14 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   release-please:
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -26,6 +25,8 @@ jobs:
   build-release:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
     strategy:
       matrix:
         include:
@@ -87,6 +88,8 @@ jobs:
   publish-release:
     needs: [release-please, build-release]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -110,8 +113,3 @@ jobs:
             artifacts/shift-*.tar.gz \
             artifacts/checksums.txt \
             --clobber
-
-      - name: Update latest tag
-        run: |
-          git tag -f latest
-          git push -f origin latest

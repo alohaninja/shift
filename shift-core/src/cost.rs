@@ -71,7 +71,30 @@ impl TokenSavings {
     }
 
     /// Aggregate from per-image metrics.
+    ///
+    /// Excludes dropped images (transformed dimensions 0×0 with non-zero
+    /// original dimensions) so that information removal is not counted as
+    /// token "savings". Use [`from_metrics_all`] if you want raw totals.
     pub fn from_metrics(metrics: &[ImageMetrics]) -> Self {
+        let mut s = TokenSavings::default();
+        for m in metrics {
+            // Skip dropped images: original had tokens but transformed is 0×0
+            let was_dropped = (m.original_width > 0 || m.original_height > 0)
+                && m.transformed_width == 0
+                && m.transformed_height == 0;
+            if was_dropped {
+                continue;
+            }
+            s.openai_before += m.tokens_before.openai_tokens;
+            s.openai_after += m.tokens_after.openai_tokens;
+            s.anthropic_before += m.tokens_before.anthropic_tokens;
+            s.anthropic_after += m.tokens_after.anthropic_tokens;
+        }
+        s
+    }
+
+    /// Aggregate from all per-image metrics including dropped images.
+    pub fn from_metrics_all(metrics: &[ImageMetrics]) -> Self {
         let mut s = TokenSavings::default();
         for m in metrics {
             s.openai_before += m.tokens_before.openai_tokens;
@@ -94,11 +117,18 @@ impl TokenSavings {
 ///
 /// For `detail: low`: fixed 85 tokens.
 ///
-/// **Note:** This implements the tile-based formula for GPT-4o, GPT-4.1,
-/// GPT-4o-mini, and o-series models (except o4-mini). Newer models
-/// (GPT-4.1 2025-04-14+, o4-mini) use patch-based tokenization with
-/// different budgets. Pass-through accuracy for those models is not
-/// guaranteed.
+/// **Accuracy:** This implements the tile-based formula that is correct for
+/// **GPT-4o, GPT-4.1, and GPT-4.5** (base=85, tile=170). Other model
+/// families use different constants:
+///
+/// | Model family          | Base | Tile   | This function |
+/// |-----------------------|------|--------|---------------|
+/// | GPT-4o / 4.1 / 4.5   |   85 |   170  | Correct       |
+/// | GPT-4o-mini           | 2833 | 5,667  | ~33× under    |
+/// | o1 / o1-pro / o3      |   75 |   150  | ~13% over     |
+///
+/// Newer models (GPT-4.1 2025-04-14+, o4-mini) use patch-based tokenization
+/// with different budgets and are not covered by this formula.
 pub fn openai_tokens(width: u32, height: u32) -> u64 {
     if width == 0 || height == 0 {
         return 0;
@@ -332,6 +362,59 @@ mod tests {
         assert!(est.anthropic_tokens > 0);
     }
 
+    // ── estimate_tokens: different dimensions produce different results ─
+
+    #[test]
+    fn test_estimate_tokens_varies_by_size() {
+        let small = estimate_tokens(100, 100);
+        let large = estimate_tokens(4000, 3000);
+        // A 100x100 and 4000x3000 should not produce identical estimates
+        // (OpenAI: 255 vs 765; Anthropic: different too)
+        assert_ne!(
+            small.openai_tokens, large.openai_tokens,
+            "different dimensions should produce different OpenAI estimates"
+        );
+    }
+
+    // ── Extreme aspect ratios ────────────────────────────────────
+
+    #[test]
+    fn test_openai_extreme_tall() {
+        // 1x10000:
+        // Cap longest at 2048 → scale=2048/10000=0.2048 → ceil(1*0.2048)=1, ceil(10000*0.2048)=2048
+        // Shortest side 1 ≤ 768 → no further scaling
+        // Tiles: ceil(1/512)=1 * ceil(2048/512)=4 → 4 tiles → 4*170+85 = 765
+        assert_eq!(openai_tokens(1, 10000), 765);
+    }
+
+    #[test]
+    fn test_openai_extreme_wide() {
+        // 10000x1: same logic, just rotated
+        assert_eq!(openai_tokens(10000, 1), 765);
+    }
+
+    #[test]
+    fn test_anthropic_extreme_tall() {
+        // 1x10000: long edge 10000 > 1568 → scale=1568/10000=0.1568
+        //   → ceil(1*0.1568)=1, ceil(10000*0.1568)=1568
+        // pad: 1→28, 1568→1568
+        // tokens = 28*1568/750 = 58
+        let tokens = anthropic_tokens(1, 10000);
+        assert!(tokens > 0 && tokens < 100, "got {}", tokens);
+    }
+
+    #[test]
+    fn test_openai_1x1() {
+        // 1x1: fits in one tile → 170 + 85 = 255
+        assert_eq!(openai_tokens(1, 1), 255);
+    }
+
+    #[test]
+    fn test_anthropic_1x1() {
+        // 1x1: pad to 28x28, tokens = 28*28/750 = 1
+        assert_eq!(anthropic_tokens(1, 1), 1);
+    }
+
     // ── Scaling helpers ──────────────────────────────────────────
 
     #[test]
@@ -341,5 +424,62 @@ mod tests {
         assert_eq!(next_multiple_of_28(1), 28);
         assert_eq!(next_multiple_of_28(200), 224);
         assert_eq!(next_multiple_of_28(1568), 1568);
+    }
+
+    // ── TokenSavings: dropped images excluded ────────────────────
+
+    #[test]
+    fn test_savings_excludes_dropped() {
+        use crate::cost::ImageMetrics;
+
+        let metrics = vec![
+            // Normal resize: 4000x3000 -> 2048x1536
+            ImageMetrics {
+                image_index: 0,
+                original_width: 4000,
+                original_height: 3000,
+                transformed_width: 2048,
+                transformed_height: 1536,
+                original_bytes: 5_000_000,
+                transformed_bytes: 500_000,
+                format_before: "png".to_string(),
+                format_after: "png".to_string(),
+                tokens_before: estimate_tokens(4000, 3000),
+                tokens_after: estimate_tokens(2048, 1536),
+            },
+            // Dropped image: 1000x1000 -> 0x0
+            ImageMetrics {
+                image_index: 1,
+                original_width: 1000,
+                original_height: 1000,
+                transformed_width: 0,
+                transformed_height: 0,
+                original_bytes: 100_000,
+                transformed_bytes: 0,
+                format_before: "png".to_string(),
+                format_after: "png".to_string(),
+                tokens_before: estimate_tokens(1000, 1000),
+                tokens_after: estimate_tokens(0, 0),
+            },
+        ];
+
+        let savings = TokenSavings::from_metrics(&metrics);
+        let savings_all = TokenSavings::from_metrics_all(&metrics);
+
+        // from_metrics should only include the resize, not the drop
+        assert_eq!(
+            savings.openai_before,
+            estimate_tokens(4000, 3000).openai_tokens
+        );
+        assert_eq!(
+            savings.openai_after,
+            estimate_tokens(2048, 1536).openai_tokens
+        );
+
+        // from_metrics_all should include both
+        assert_eq!(
+            savings_all.openai_before,
+            estimate_tokens(4000, 3000).openai_tokens + estimate_tokens(1000, 1000).openai_tokens
+        );
     }
 }

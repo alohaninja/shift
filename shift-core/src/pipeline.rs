@@ -161,13 +161,23 @@ pub fn process(payload: &Value, config: &ShiftConfig) -> Result<(Value, Report)>
             // Record metrics for SVG
             let (_, ref out_data, ref out_mime) = result;
             let (tw, th) = if out_data.is_empty() {
+                // SVG was dropped (source mode)
                 (0, 0)
+            } else if config.dry_run {
+                // Dry-run: estimate target dims from policy actions so we
+                // can preview token savings without actually rasterizing.
+                estimate_dims_from_actions(&actions, orig_w, orig_h)
             } else {
                 inspector::image::inspect_bytes(out_data)
                     .map(|m| (m.width, m.height))
                     .unwrap_or((orig_w, orig_h))
             };
-            let format_after = mime_to_short(out_mime);
+            let format_after = if config.dry_run && !out_data.is_empty() {
+                // In dry-run the data is still SVG, but we'd produce PNG
+                "png".to_string()
+            } else {
+                mime_to_short(out_mime)
+            };
             report.add_image_metrics(ImageMetrics {
                 image_index: extracted.global_index,
                 original_width: orig_w,
