@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/alohaninja/shift/compare/v0.2.0...v0.3.0) (2026-04-24)
+
+
+### Features
+
+* RTK-inspired gain dashboard with sparkline and auto-purge ([#9](https://github.com/alohaninja/shift/issues/9)) ([6f84e27](https://github.com/alohaninja/shift/commit/6f84e27cf9bdb28b3cfea19f35a50ffc2eeaef5f))
+
 ## [0.2.0](https://github.com/alohaninja/shift/compare/v0.1.4...v0.2.0) (2026-04-24)
 
 
