@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/alohaninja/shift/compare/v0.3.0...v0.4.0) (2026-04-24)
+
+
+### Features
+
+* add GitHub Pages site with RTK-style landing page and guide ([#12](https://github.com/alohaninja/shift/issues/12)) ([cbc7f76](https://github.com/alohaninja/shift/commit/cbc7f76a21b7298fdee05f55e616e651793ce504))
+
 ## [0.3.0](https://github.com/alohaninja/shift/compare/v0.2.0...v0.3.0) (2026-04-24)
 
 
