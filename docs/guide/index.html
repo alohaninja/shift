@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guide — SHIFT</title>
+  <meta name="description" content="Full user guide for SHIFT: installation, CLI reference, drive modes, provider profiles, library usage, and troubleshooting.">
+  <link rel="canonical" href="https://alohaninja.github.io/shift/guide/">
+  <link rel="icon" type="image/png" href="../shift-icon.png">
+  <meta name="theme-color" content="#060b18">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #060b18;
+      --bg-alt: #0c1225;
+      --bg-card: #0f1629;
+      --border: #1a2344;
+      --border-light: #243056;
+      --text: #e2e8f0;
+      --text-bright: #f8fafc;
+      --text-muted: #64748b;
+      --text-dim: #475569;
+      --accent: #00e599;
+      --accent-dim: rgba(0, 229, 153, 0.10);
+      --cyan: #38bdf8;
+      --cyan-dim: rgba(56, 189, 248, 0.10);
+      --violet: #a78bfa;
+      --violet-dim: rgba(167, 139, 250, 0.12);
+      --red: #f87171;
+      --orange: #fb923c;
+      --pink: #ec4899;
+      --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --max-w: 820px;
+      --radius: 12px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-body); background: var(--bg); color: var(--text);
+      line-height: 1.7; -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: var(--font-mono); }
+
+    /* Nav */
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      background: rgba(6, 11, 24, 0.82); border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: 1140px; margin: 0 auto; padding: 0 24px;
+      height: 60px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .nav-logo { display: flex; align-items: center; gap: 8px; color: var(--text-bright); font-weight: 700; font-size: 1.15rem; }
+    .nav-logo:hover { text-decoration: none; }
+    .nav-links { display: flex; align-items: center; gap: 24px; }
+    .nav-links a { color: var(--text-muted); font-size: 0.875rem; font-weight: 500; transition: color 0.2s; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .nav-links .active { color: var(--accent); }
+    .btn-sm { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 8px; font-weight: 600; font-size: 0.8rem; font-family: var(--font-body); border: 1px solid var(--border); color: var(--text-muted); transition: all 0.2s; }
+    .btn-sm:hover { color: var(--text); border-color: var(--text-muted); text-decoration: none; }
+
+    /* Layout */
+    .page { display: flex; max-width: 1140px; margin: 0 auto; padding-top: 60px; }
+
+    /* Sidebar */
+    .sidebar {
+      width: 220px; flex-shrink: 0; position: sticky; top: 60px;
+      height: calc(100vh - 60px); overflow-y: auto; padding: 32px 16px 32px 24px;
+      border-right: 1px solid var(--border);
+    }
+    .sidebar-section { margin-bottom: 24px; }
+    .sidebar-title { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 8px; }
+    .sidebar a {
+      display: block; padding: 4px 10px; margin: 2px 0; border-radius: 6px;
+      font-size: 0.82rem; color: var(--text-muted); transition: all 0.15s;
+    }
+    .sidebar a:hover { color: var(--text); background: rgba(255,255,255,0.04); text-decoration: none; }
+    .sidebar a.active { color: var(--accent); background: var(--accent-dim); }
+
+    /* Content */
+    .content { flex: 1; min-width: 0; padding: 48px 48px 80px; max-width: var(--max-w); }
+
+    .content h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 8px; color: var(--text-bright); }
+    .content h2 { font-size: 1.4rem; font-weight: 700; margin-top: 56px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: var(--text-bright); }
+    .content h3 { font-size: 1.05rem; font-weight: 700; margin-top: 32px; margin-bottom: 12px; color: var(--text-bright); }
+    .content p { margin-bottom: 16px; color: var(--text); }
+    .content ul, .content ol { margin-bottom: 16px; padding-left: 24px; }
+    .content li { margin-bottom: 6px; color: var(--text); }
+    .content strong { color: var(--text-bright); }
+    .lead { font-size: 1.05rem; color: var(--text-muted); margin-bottom: 32px; }
+
+    /* Code blocks */
+    .code-block-full {
+      background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 18px 20px; margin-bottom: 20px; overflow-x: auto; position: relative;
+    }
+    .code-block-full code { color: var(--accent); font-size: 0.8rem; line-height: 1.6; display: block; white-space: pre; }
+    .code-block-full .comment { color: var(--text-dim); }
+    .code-lang {
+      position: absolute; top: 8px; right: 12px; font-size: 0.62rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); font-family: var(--font-mono);
+    }
+
+    /* Inline code */
+    .content code:not(.code-block-full code) {
+      background: var(--bg-alt); border: 1px solid var(--border); border-radius: 4px;
+      padding: 2px 6px; font-size: 0.82em; color: var(--accent);
+    }
+
+    /* Tables */
+    .guide-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-bottom: 20px; }
+    .guide-table th { text-align: left; padding: 10px 14px; background: var(--bg-alt); color: var(--text-muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
+    .guide-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text); font-size: 0.85rem; }
+    .guide-table tr:last-child td { border-bottom: none; }
+    .guide-table tbody tr:hover td { background: rgba(255,255,255,0.02); }
+    .table-wrap-guide { border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; margin-bottom: 20px; }
+
+    /* Callout */
+    .callout { padding: 16px 20px; border-radius: var(--radius); border-left: 3px solid var(--accent); background: var(--accent-dim); margin-bottom: 20px; font-size: 0.88rem; }
+    .callout-warn { border-left-color: var(--orange); background: rgba(251, 146, 60, 0.08); }
+
+    /* Badges */
+    .format-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; font-family: var(--font-mono); background: var(--cyan-dim); color: var(--cyan); margin: 2px; }
+
+    /* Footer */
+    .footer { border-top: 1px solid var(--border); padding: 24px 0; background: var(--bg); }
+    .footer-inner { max-width: 1140px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; font-size: 0.82rem; color: var(--text-muted); }
+    .footer-links { display: flex; gap: 20px; }
+    .footer-links a { color: var(--text-muted); transition: color 0.2s; }
+    .footer-links a:hover { color: var(--text); text-decoration: none; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .content { padding: 32px 20px 60px; }
+      .page { padding-top: 60px; }
+      .nav-links a:not(.btn-sm) { display: none; }
+      .footer-inner { flex-direction: column; gap: 12px; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Nav -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="../" class="nav-logo">
+        <img src="../shift-icon.png" alt="SHIFT logo" width="28" height="28" style="border-radius: 6px;">
+        <span>SHIFT</span>
+      </a>
+      <div class="nav-links">
+        <a href="../#problem">Why</a>
+        <a href="../#demo">Demo</a>
+        <a href="./" class="active">Guide</a>
+        <a href="../#install">Install</a>
+        <a href="https://github.com/alohaninja/shift" class="btn-sm" target="_blank" rel="noopener">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="page">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-title">Getting Started</div>
+        <a href="#installation" class="active">Installation</a>
+        <a href="#quick-start">Quick Start</a>
+        <a href="#verify">Verify</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">Usage</div>
+        <a href="#cli-reference">CLI Reference</a>
+        <a href="#drive-modes">Drive Modes</a>
+        <a href="#svg-handling">SVG Handling</a>
+        <a href="#gain-dashboard">Gain Dashboard</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">Configuration</div>
+        <a href="#provider-profiles">Provider Profiles</a>
+        <a href="#supported-formats">Supported Formats</a>
+        <a href="#custom-profiles">Custom Profiles</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">Developer</div>
+        <a href="#library-usage">Library Usage</a>
+        <a href="#project-structure">Project Structure</a>
+        <a href="#ai-agent-skill">AI Agent Skill</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">More</div>
+        <a href="#troubleshooting">Troubleshooting</a>
+        <a href="#roadmap">Roadmap</a>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <main class="content">
+      <h1>SHIFT Guide</h1>
+      <p class="lead">Everything you need to install, configure, and use SHIFT to optimize multimodal AI API requests.</p>
+
+      <!-- Installation -->
+      <h2 id="installation">Installation</h2>
+
+      <h3>Homebrew (recommended)</h3>
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>brew tap alohaninja/shift
+brew install shift-ai</code>
+      </div>
+
+      <h3>Quick install script</h3>
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>curl -fsSL https://raw.githubusercontent.com/alohaninja/shift/main/install.sh | sh</code>
+      </div>
+      <p>Installs to <code>~/.local/bin</code>. Detects OS and architecture automatically (macOS x86/arm, Linux x86/arm).</p>
+
+      <h3>From crates.io</h3>
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>cargo install shift-preflight-cli</code>
+      </div>
+
+      <h3>Pre-built binaries</h3>
+      <p>Download from <a href="https://github.com/alohaninja/shift/releases">GitHub Releases</a> for macOS (x86/arm) and Linux (x86/arm).</p>
+
+      <h3>From source</h3>
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>git clone https://github.com/alohaninja/shift.git && cd shift
+cargo install --path shift-cli</code>
+      </div>
+
+      <!-- Quick Start -->
+      <h2 id="quick-start">Quick Start</h2>
+
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code><span class="comment"># Transform an OpenAI request (stdin/stdout pipe)</span>
+cat request.json | shift-ai -p openai -m balanced > safe_request.json
+
+<span class="comment"># Transform an Anthropic request from a file</span>
+shift-ai request.json -p anthropic -m economy > safe_request.json
+
+<span class="comment"># See what would change without modifying anything</span>
+shift-ai request.json --dry-run -o report
+
+<span class="comment"># Compose with curl</span>
+shift-ai request.json -p openai | curl -s -X POST \
+  https://api.openai.com/v1/chat/completions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @-</code>
+      </div>
+
+      <!-- Verify -->
+      <h2 id="verify">Verify Installation</h2>
+
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>shift-ai --version
+shift-ai --help
+
+<span class="comment"># Quick validation -- transform a sample payload</span>
+echo '{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}' | shift-ai
+
+<span class="comment"># Check stats tracking</span>
+shift-ai gain</code>
+      </div>
+
+      <!-- CLI Reference -->
+      <h2 id="cli-reference">CLI Reference</h2>
+
+      <div class="code-block-full">
+        <span class="code-lang">text</span>
+        <code>shift-ai [OPTIONS] [FILE]
+
+Arguments:
+  [FILE]  Input file (JSON request payload). Reads stdin if omitted.
+
+Options:
+  -p, --provider &lt;PROVIDER&gt;  Target provider [default: openai]
+                              [openai, anthropic, claude]
+  -m, --mode &lt;MODE&gt;          Drive mode [default: balanced]
+                              [performance, balanced, economy]
+      --svg-mode &lt;MODE&gt;      SVG handling [default: raster]
+                              [raster, source, hybrid]
+  -o, --output &lt;FORMAT&gt;      Output format [default: json]
+                              [json, report, json-report, both]
+      --dry-run              Show what would change without modifying
+      --profile &lt;FILE&gt;       Custom provider profile JSON
+      --model &lt;MODEL&gt;        Target model (overrides model in payload)
+      --no-stats             Disable saving run statistics
+  -v, --verbose              Verbose output
+
+Commands:
+  shift-ai gain                 Show cumulative token savings
+  shift-ai gain --daily         Day-by-day breakdown
+  shift-ai gain --format json   Machine-readable output for dashboards</code>
+      </div>
+
+      <!-- Drive Modes -->
+      <h2 id="drive-modes">Drive Modes</h2>
+
+      <p>Choose your optimization level per request with <code>-m</code> / <code>--mode</code>.</p>
+
+      <div class="table-wrap-guide">
+        <table class="guide-table">
+          <thead>
+            <tr><th>Mode</th><th>Behavior</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong style="color:#22c55e;">performance</strong></td>
+              <td>Minimal transforms. Only enforce hard provider limits (max dimension, max file size). Preserve original fidelity.</td>
+            </tr>
+            <tr>
+              <td><strong style="color:var(--cyan);">balanced</strong> (default)</td>
+              <td>Moderate optimization. Resize oversized images, recompress bloated files. Remove obvious waste.</td>
+            </tr>
+            <tr>
+              <td><strong style="color:var(--orange);">economy</strong></td>
+              <td>Aggressive optimization. Downscale everything to 1024px, drop excess images beyond provider limits, minimize token usage.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- SVG Handling -->
+      <h2 id="svg-handling">SVG Handling</h2>
+
+      <p>Most AI model APIs reject SVG. SHIFT detects SVG inputs and handles them based on <code>--svg-mode</code>:</p>
+
+      <div class="table-wrap-guide">
+        <table class="guide-table">
+          <thead>
+            <tr><th>Mode</th><th>Behavior</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>raster</strong> (default)</td>
+              <td>Rasterize SVG to PNG via <code>resvg</code>. Provider-safe, works everywhere.</td>
+            </tr>
+            <tr>
+              <td><strong>source</strong></td>
+              <td>Replace the image with SVG XML as a text content block.</td>
+            </tr>
+            <tr>
+              <td><strong>hybrid</strong></td>
+              <td>Rasterize to PNG <em>and</em> retain SVG source as text. Best of both worlds.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Gain Dashboard -->
+      <h2 id="gain-dashboard">Gain Dashboard</h2>
+
+      <p>SHIFT automatically records run statistics to <code>~/.shift/stats.jsonl</code>. View cumulative savings:</p>
+
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>$ shift-ai gain
+
+=== SHIFT Cumulative Savings ===
+
+Runs:     42
+Images:   156 processed, 89 modified
+Bytes:    247.3 MB saved
+
+Token Savings (estimated):
+  OpenAI:    52,400 -> 12,300 tokens  (76.5% saved)
+  Anthropic: 84,200 -> 28,100 tokens  (66.6% saved)</code>
+      </div>
+
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>$ shift-ai gain --daily
+
+=== SHIFT Daily Token Savings ===
+
+Date          Runs  Images    OpenAI saved Anthropic saved
+----------------------------------------------------------
+2026-04-20       8      24           3,200           5,400
+2026-04-21      12      42           4,800           8,200
+2026-04-22      22      90          12,100          18,500</code>
+      </div>
+
+      <p>Use <code>shift-ai gain --format json</code> for machine-readable output suitable for dashboards.</p>
+
+      <!-- Provider Profiles -->
+      <h2 id="provider-profiles">Provider Profiles</h2>
+
+      <p>Built-in constraints for the two major multimodal providers:</p>
+
+      <div class="table-wrap-guide">
+        <table class="guide-table">
+          <thead>
+            <tr><th>Provider</th><th>Max images</th><th>Max dimension</th><th>Max file size</th><th>Megapixel limit</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>OpenAI</strong></td><td>10</td><td>2048 px</td><td>20 MB</td><td>--</td>
+            </tr>
+            <tr>
+              <td><strong>Anthropic</strong></td><td>20</td><td>8000 px</td><td>5 MB</td><td>1.15 MP</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Profiles include per-model overrides (gpt-4o, gpt-4.1, claude-sonnet-4, etc.) and fall back to provider defaults for unknown models.</p>
+
+      <div class="callout">
+        <strong>Token counting:</strong> OpenAI uses tile-based counting (GPT-4o/4.1 family, 512x512 tiles). Anthropic uses pixel-based (w&times;h/750, 1568px long-edge cap for standard models). Opus 4.7 supports 2576px.
+      </div>
+
+      <!-- Supported Formats -->
+      <h2 id="supported-formats">Supported Formats</h2>
+
+      <h3>Detected and processed</h3>
+
+      <p><strong>Raster images:</strong>
+        <span class="format-badge">PNG</span>
+        <span class="format-badge">JPEG</span>
+        <span class="format-badge">GIF</span>
+        <span class="format-badge">WebP</span>
+        <span class="format-badge">BMP</span>
+        <span class="format-badge">TIFF</span>
+      </p>
+      <p><strong>Vector images:</strong>
+        <span class="format-badge">SVG</span> (auto-rasterized to PNG)
+      </p>
+      <p><strong>Encodings:</strong>
+        <span class="format-badge">base64 data URIs</span>
+        <span class="format-badge">raw base64</span>
+        <span class="format-badge">URL references</span>
+      </p>
+
+      <p>BMP and TIFF are auto-converted to PNG. SVGs are rasterized. Everything else passes through if it meets provider constraints.</p>
+
+      <!-- Custom Profiles -->
+      <h2 id="custom-profiles">Custom Profiles</h2>
+
+      <p>Load a custom provider profile with <code>--profile custom.json</code>. The JSON structure matches the built-in profiles in <code>profiles/</code>.</p>
+
+      <!-- Library Usage -->
+      <h2 id="library-usage">Library Usage</h2>
+
+      <p>SHIFT is split into two crates: <code>shift-preflight</code> (library) and <code>shift-preflight-cli</code> (binary, installs as <code>shift-ai</code>). The library can be used directly in Rust applications:</p>
+
+      <div class="code-block-full">
+        <span class="code-lang">toml</span>
+        <code>[dependencies]
+shift-preflight = "0.1"</code>
+      </div>
+
+      <div class="code-block-full">
+        <span class="code-lang">rust</span>
+        <code>use shift_preflight::{pipeline, ShiftConfig, DriveMode};
+use serde_json::json;
+
+let payload = json!({
+    "model": "gpt-4o",
+    "messages": [{
+        "role": "user",
+        "content": [{
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,..."}
+        }]
+    }]
+});
+
+let config = ShiftConfig {
+    mode: DriveMode::Balanced,
+    provider: "openai".to_string(),
+    ..Default::default()
+};
+
+let (safe_payload, report) = pipeline::process(&payload, &config).unwrap();
+eprintln!("{}", report); <span class="comment">// what changed and why</span></code>
+      </div>
+
+      <!-- Project Structure -->
+      <h2 id="project-structure">Project Structure</h2>
+
+      <div class="code-block-full">
+        <span class="code-lang">text</span>
+        <code>shift/
+├── shift-core/          Library crate: shift-preflight
+│   └── src/
+│       ├── inspector/   Format detection, metadata extraction
+│       ├── policy/      Provider profiles, constraint evaluation
+│       ├── transformer/ Image resize, recompress, SVG rasterize
+│       ├── payload/     OpenAI + Anthropic message format parse
+│       ├── pipeline.rs  Orchestrator: inspect -> policy -> transform
+│       ├── cost.rs      Token estimation (OpenAI tile, Anthropic pixel)
+│       ├── stats.rs     Persistent run statistics, gain summaries
+│       ├── report.rs    Transformation report with token savings
+│       └── mode.rs      DriveMode, SvgMode, ShiftConfig
+├── shift-cli/           Binary crate → shift-ai
+├── profiles/            Provider constraint JSON (embedded at compile)
+├── tests/               Test images and sample payloads
+└── .github/workflows/   CI + release pipelines</code>
+      </div>
+
+      <!-- AI Agent Skill -->
+      <h2 id="ai-agent-skill">AI Agent Skill</h2>
+
+      <p>If you use an AI coding agent (Claude Code, Cursor, Copilot, Windsurf, etc.), you can teach it to use SHIFT automatically:</p>
+
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>npx skills add alohaninja/shift</code>
+      </div>
+
+      <p>This installs the <code>shift-ai-preflight</code> skill, which teaches your agent when and how to use SHIFT to optimize image payloads. The skill activates automatically when building or debugging multimodal API requests with inline base64 images.</p>
+
+      <!-- Troubleshooting -->
+      <h2 id="troubleshooting">Troubleshooting</h2>
+
+      <h3>shift-ai: command not found</h3>
+      <p>If you installed via the curl script, make sure <code>~/.local/bin</code> is in your <code>PATH</code>:</p>
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc  <span class="comment"># or ~/.bashrc</span>
+source ~/.zshrc</code>
+      </div>
+
+      <h3>400 errors from AI APIs</h3>
+      <p>This is exactly what SHIFT prevents. Make sure you're piping your request through SHIFT before sending to the API:</p>
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>shift-ai request.json -p openai | curl -s -X POST \
+  https://api.openai.com/v1/chat/completions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @-</code>
+      </div>
+
+      <h3>SVG not rendering after rasterization</h3>
+      <p>SHIFT uses <code>resvg</code> for SVG rasterization, which supports most SVG features including gradients, text, and viewBox. If your SVG uses external resources (fonts, linked images), they may not render. Try <code>--svg-mode source</code> to pass the SVG as text instead.</p>
+
+      <h3>Stats file location</h3>
+      <p>Run statistics are stored at <code>~/.shift/stats.jsonl</code>. Delete this file to reset your cumulative stats. Use <code>--no-stats</code> to disable tracking for a single run.</p>
+
+      <!-- Roadmap -->
+      <h2 id="roadmap">Roadmap (v2+)</h2>
+
+      <ul>
+        <li><strong>Video:</strong> frame sampling, keyframe extraction, resolution downscale</li>
+        <li><strong>Audio:</strong> compression, transcription to text</li>
+        <li><strong>Documents:</strong> chunking, summarization, text extraction</li>
+        <li><strong>Smart image selection:</strong> near-duplicate detection, keep most informative</li>
+        <li><strong>Caption fallback:</strong> replace low-value images with text descriptions</li>
+        <li><strong>Adaptive policies:</strong> dynamic adjustment based on request size and latency targets</li>
+      </ul>
+
+    </main>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <span>Apache-2.0 &middot; Built with Rust</span>
+      <div class="footer-links">
+        <a href="https://github.com/alohaninja/shift" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/alohaninja/shift/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="../">Home</a>
+        <a href="https://github.com/alohaninja/shift/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Highlight active sidebar link on scroll
+    var sections = document.querySelectorAll('h2[id], h3[id]');
+    var links = document.querySelectorAll('.sidebar a');
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          links.forEach(function(l) { l.classList.remove('active'); });
+          var link = document.querySelector('.sidebar a[href="#' + entry.target.id + '"]');
+          if (link) link.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-80px 0px -60% 0px', threshold: 0 });
+    sections.forEach(function(s) { observer.observe(s); });
+  </script>
+</body>
+</html>
