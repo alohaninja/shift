@@ -12,6 +12,20 @@
   A multimodal preflight layer that automatically adapts inputs before they reach an AI model.
 </p>
 
+<p align="center">
+  <a href="https://github.com/alohaninja/shift/actions"><img src="https://github.com/alohaninja/shift/workflows/CI/badge.svg" alt="CI"></a>
+  <a href="https://github.com/alohaninja/shift/releases"><img src="https://img.shields.io/github/v/release/alohaninja/shift" alt="Release"></a>
+  <a href="https://crates.io/crates/shift-preflight-cli"><img src="https://img.shields.io/crates/v/shift-preflight-cli" alt="crates.io"></a>
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
+</p>
+
+<p align="center">
+  <a href="https://shift-ai.dev">Website</a> &bull;
+  <a href="https://shift-ai.dev/guide/">Guide</a> &bull;
+  <a href="#install">Install</a> &bull;
+  <a href="https://github.com/alohaninja/shift/blob/main/CHANGELOG.md">Changelog</a>
+</p>
+
 ---
 
 ## What it does
