@@ -35,7 +35,7 @@ export async function startProxy(
   // Check shift-ai availability at startup
   const available = await isShiftAvailable(config.binary);
 
-  const server = serve({ fetch: app.fetch, port });
+  const server = serve({ fetch: app.fetch, port, hostname: "127.0.0.1" });
 
   console.log(`
 ┌─────────────────────────────────────────────┐

@@ -20,11 +20,31 @@ export async function toBuffer(
   }
 
   if (data instanceof URL) {
-    const response = await fetch(data.toString());
+    // Validate URL scheme to prevent SSRF
+    const scheme = data.protocol;
+    if (scheme !== "https:" && scheme !== "http:") {
+      throw new Error(`Unsupported URL scheme: ${scheme} (only http/https allowed)`);
+    }
+
+    const MAX_IMAGE_SIZE = 50 * 1024 * 1024; // 50MB
+    const response = await fetch(data.toString(), {
+      signal: AbortSignal.timeout(30_000),
+      redirect: "follow",
+    });
     if (!response.ok) {
       throw new Error(`Failed to fetch image from ${data}: ${response.status}`);
     }
+
+    // Check content-length before reading body
+    const contentLength = response.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > MAX_IMAGE_SIZE) {
+      throw new Error(`Image too large: ${contentLength} bytes (max ${MAX_IMAGE_SIZE})`);
+    }
+
     const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength > MAX_IMAGE_SIZE) {
+      throw new Error(`Image too large: ${arrayBuffer.byteLength} bytes (max ${MAX_IMAGE_SIZE})`);
+    }
     const buffer = Buffer.from(arrayBuffer);
     return { buffer, originalSize: buffer.length };
   }
@@ -52,24 +72,24 @@ export function fromBuffer(
   return buffer.toString("base64");
 }
 
+/** Image subtypes that SHIFT can optimize (hoisted to avoid per-call allocation). */
+const OPTIMIZABLE_SUBTYPES = new Set([
+  "png",
+  "jpeg",
+  "jpg",
+  "gif",
+  "webp",
+  "bmp",
+  "tiff",
+  "svg+xml",
+]);
+
 /**
  * Check whether a media type is an image type that SHIFT can optimize.
  */
 export function isOptimizableImage(mediaType: string): boolean {
   if (!mediaType.startsWith("image/")) return false;
-  // SVG is passed through by SHIFT's rasterizer — include it
-  // Skip types SHIFT doesn't handle
   const subtype = mediaType.split("/")[1]?.toLowerCase();
   if (!subtype) return false;
-  const supported = new Set([
-    "png",
-    "jpeg",
-    "jpg",
-    "gif",
-    "webp",
-    "bmp",
-    "tiff",
-    "svg+xml",
-  ]);
-  return supported.has(subtype);
+  return OPTIMIZABLE_SUBTYPES.has(subtype);
 }

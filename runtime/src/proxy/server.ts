@@ -41,8 +41,8 @@ export function createProxyApp(config: ProxyConfig = {}): Hono {
   app.post("/v1beta/models/:model{.+}", createGoogleHandler(config));
   app.post("/v1/models/:model{.+}", createGoogleHandler(config));
 
-  // Catch-all — forward to auto-detected provider
-  app.all("/*", createPassthroughHandler(config));
+  // Catch-all — forward POST requests to auto-detected provider
+  app.post("/*", createPassthroughHandler(config));
 
   return app;
 }

@@ -16,15 +16,22 @@ const PROVIDER_ID_MAP: Record<string, ShiftProvider> = {
   "amazon-bedrock": "anthropic", // Bedrock Claude uses Anthropic constraints
 };
 
-/** Model ID prefix patterns → SHIFT provider. */
+/** Model ID prefix/exact patterns → SHIFT provider. */
 const MODEL_PREFIX_MAP: [string, ShiftProvider][] = [
   ["claude-", "anthropic"],
   ["gpt-", "openai"],
-  ["o1", "openai"],
-  ["o3", "openai"],
-  ["o4", "openai"],
+  ["o1-", "openai"],
+  ["o3-", "openai"],
+  ["o4-", "openai"],
   ["gemini-", "google"],
 ];
+
+/** Exact model ID matches → SHIFT provider. */
+const MODEL_EXACT_MAP: Record<string, ShiftProvider> = {
+  o1: "openai",
+  o3: "openai",
+  o4: "openai",
+};
 
 /**
  * Detect the SHIFT provider from an AI SDK model object.
@@ -49,9 +56,11 @@ export function detectProviderFromModel(model: {
     }
   }
 
-  // Try model ID prefix
+  // Try model ID exact match, then prefix
   if (model.modelId) {
     const id = model.modelId.toLowerCase();
+    const exact = MODEL_EXACT_MAP[id];
+    if (exact) return exact;
     for (const [prefix, provider] of MODEL_PREFIX_MAP) {
       if (id.startsWith(prefix)) return provider;
     }

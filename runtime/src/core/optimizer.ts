@@ -21,6 +21,29 @@ import type { OptimizeImageInput, OptimizeImageResult } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
+/** Maximum concurrent shift-ai processes. */
+const MAX_CONCURRENT = 8;
+let _inflight = 0;
+const _waiters: Array<() => void> = [];
+
+async function acquireSlot(): Promise<void> {
+  if (_inflight < MAX_CONCURRENT) {
+    _inflight++;
+    return;
+  }
+  await new Promise<void>((resolve) => _waiters.push(resolve));
+  _inflight++;
+}
+
+function releaseSlot(): void {
+  _inflight--;
+  const next = _waiters.shift();
+  if (next) next();
+}
+
+const VALID_PROVIDERS = new Set<string>(["anthropic", "openai", "google"]);
+const VALID_MODES = new Set<string>(["performance", "balanced", "economy"]);
+
 /**
  * Optimize a single image via the shift-ai CLI.
  *
@@ -33,11 +56,21 @@ export async function optimizeImage(
   const available = await isShiftAvailable(input.binary);
   if (!available) return null;
 
+  // Validate provider and mode
+  if (!VALID_PROVIDERS.has(input.provider)) {
+    console.warn(`[shift-runtime] Invalid provider: ${input.provider}`);
+    return null;
+  }
+  if (!VALID_MODES.has(input.mode)) {
+    console.warn(`[shift-runtime] Invalid mode: ${input.mode}`);
+    return null;
+  }
+
   const bin = input.binary ?? getShiftBinary();
   const id = randomBytes(6).toString("hex");
   const tmpIn = join(tmpdir(), `shift-rt-${id}-in.json`);
-  const tmpOut = join(tmpdir(), `shift-rt-${id}-out.json`);
 
+  await acquireSlot();
   try {
     // Build a minimal Anthropic-format payload wrapping the single image
     const base64Data = input.buffer.toString("base64");
@@ -64,13 +97,23 @@ export async function optimizeImage(
       ],
     };
 
-    await writeFile(tmpIn, JSON.stringify(wrapperPayload));
+    await writeFile(tmpIn, JSON.stringify(wrapperPayload), { mode: 0o600 });
+
+    // Map Google to Anthropic until shift-ai adds native --provider google
+    let cliProvider = input.provider;
+    if (cliProvider === "google") {
+      console.warn(
+        "[shift-runtime] Google provider not yet natively supported by shift-ai; " +
+          "using Anthropic optimization profile. Results may not be optimal for Gemini.",
+      );
+      cliProvider = "anthropic";
+    }
 
     // Run shift-ai
     const args = [
       tmpIn,
       "--provider",
-      input.provider === "google" ? "anthropic" : input.provider,
+      cliProvider,
       "--mode",
       input.mode,
       "--no-stats",
@@ -105,13 +148,14 @@ export async function optimizeImage(
       buffer: optimizedBuffer,
       mediaType: optimizedMediaType,
     };
-  } catch {
-    // Optimization failed — return null (passthrough)
+  } catch (error) {
+    // Optimization failed — log and return null (passthrough)
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`[shift-runtime] optimizeImage failed: ${msg}`);
     return null;
   } finally {
-    // Clean up temp files
+    releaseSlot();
     await unlink(tmpIn).catch(() => {});
-    await unlink(tmpOut).catch(() => {});
   }
 }
 
@@ -128,12 +172,23 @@ export async function optimizePayload(
   const available = await isShiftAvailable(binary);
   if (!available) return null;
 
+  // Validate provider and mode
+  if (!VALID_PROVIDERS.has(provider)) {
+    console.warn(`[shift-runtime] Invalid provider: ${provider}`);
+    return null;
+  }
+  if (!VALID_MODES.has(mode)) {
+    console.warn(`[shift-runtime] Invalid mode: ${mode}`);
+    return null;
+  }
+
   const bin = binary ?? getShiftBinary();
   const id = randomBytes(6).toString("hex");
   const tmpIn = join(tmpdir(), `shift-rt-proxy-${id}.json`);
 
+  await acquireSlot();
   try {
-    await writeFile(tmpIn, payload);
+    await writeFile(tmpIn, payload, { mode: 0o600 });
 
     const args = [tmpIn, "--provider", provider, "--mode", mode, "--no-stats"];
 
@@ -142,10 +197,14 @@ export async function optimizePayload(
       maxBuffer: 100 * 1024 * 1024,
     });
 
-    return stdout;
-  } catch {
+    // Trim trailing whitespace from CLI output
+    return stdout.trimEnd();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`[shift-runtime] optimizePayload failed: ${msg}`);
     return null;
   } finally {
+    releaseSlot();
     await unlink(tmpIn).catch(() => {});
   }
 }

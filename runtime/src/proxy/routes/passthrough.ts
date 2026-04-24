@@ -72,21 +72,30 @@ export function createPassthroughHandler(config: ProxyConfig) {
     const targetUrl = `${baseUrl}${url.pathname}${url.search}`;
 
     if (config.verbose) {
-      console.log(`[shift-proxy] Passthrough: ${path} → ${targetUrl}`);
+      // Redact query params from log output (may contain API keys)
+      console.log(`[shift-proxy] Passthrough: ${path} → ${baseUrl}${url.pathname}`);
     }
 
-    const body = await c.req.text();
+    const hasBody = !["GET", "HEAD"].includes(c.req.method.toUpperCase());
+    const body = hasBody ? await c.req.text() : undefined;
     const headers = forwardHeaders(c.req.raw.headers, [
       "host",
       "content-length",
     ]);
 
-    const response = await fetch(targetUrl, {
-      method: c.req.method,
-      headers,
-      body: body || undefined,
-    });
+    try {
+      const response = await fetch(targetUrl, {
+        method: c.req.method,
+        headers,
+        body: body || undefined,
+        signal: AbortSignal.timeout(120_000),
+      });
 
-    return pipeResponse(c, response);
+      return pipeResponse(c, response);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[shift-proxy] Passthrough upstream error: ${msg}`);
+      return c.json({ error: "Bad Gateway", detail: "Upstream provider unreachable" }, 502);
+    }
   };
 }

@@ -29,8 +29,10 @@ export function createGoogleHandler(config: ProxyConfig) {
     const finalBody = body;
 
     if (config.verbose) {
+      // Redact query params (may contain API key) from log output
+      const redactedUrl = `${baseUrl}${url.pathname}`;
       console.log(
-        `[shift-proxy] Google: passthrough (native Google support pending)`,
+        `[shift-proxy] Google: passthrough → ${redactedUrl} (native Google support pending)`,
       );
     }
 
@@ -39,12 +41,19 @@ export function createGoogleHandler(config: ProxyConfig) {
       "content-length",
     ]);
 
-    const response = await fetch(targetUrl, {
-      method: "POST",
-      headers,
-      body: finalBody,
-    });
+    try {
+      const response = await fetch(targetUrl, {
+        method: "POST",
+        headers,
+        body: finalBody,
+        signal: AbortSignal.timeout(120_000),
+      });
 
-    return pipeResponse(c, response);
+      return pipeResponse(c, response);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[shift-proxy] Google upstream error: ${msg}`);
+      return c.json({ error: "Bad Gateway", detail: "Upstream provider unreachable" }, 502);
+    }
   };
 }

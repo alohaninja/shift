@@ -17,7 +17,8 @@ export function createAnthropicHandler(config: ProxyConfig) {
     const mode = config.mode ?? "balanced";
     const baseUrl =
       config.providers?.anthropic ?? DEFAULT_PROVIDERS.anthropic;
-    const targetUrl = `${baseUrl}${c.req.path}`;
+    const url = new URL(c.req.url);
+    const targetUrl = `${baseUrl}${url.pathname}${url.search}`;
 
     // Optimize the payload via shift-ai
     const optimized = await optimizePayload(body, "anthropic", mode, config.binary);
@@ -38,12 +39,19 @@ export function createAnthropicHandler(config: ProxyConfig) {
       "content-length",
     ]);
 
-    const response = await fetch(targetUrl, {
-      method: "POST",
-      headers,
-      body: finalBody,
-    });
+    try {
+      const response = await fetch(targetUrl, {
+        method: "POST",
+        headers,
+        body: finalBody,
+        signal: AbortSignal.timeout(120_000),
+      });
 
-    return pipeResponse(c, response);
+      return pipeResponse(c, response);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[shift-proxy] Anthropic upstream error: ${msg}`);
+      return c.json({ error: "Bad Gateway", detail: "Upstream provider unreachable" }, 502);
+    }
   };
 }

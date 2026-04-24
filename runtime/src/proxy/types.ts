@@ -2,7 +2,7 @@
  * Configuration types for the HTTP proxy.
  */
 
-import type { DriveMode, ShiftMetrics } from "../core/types.js";
+import type { DriveMode } from "../core/types.js";
 
 export interface ProxyConfig {
   /**
@@ -18,12 +18,6 @@ export interface ProxyConfig {
   mode?: DriveMode;
 
   /**
-   * Minimum image size in bytes to trigger optimization.
-   * @default 100_000
-   */
-  minSize?: number;
-
-  /**
    * Upstream provider base URLs.
    * Defaults to the official API endpoints.
    */
@@ -37,11 +31,6 @@ export interface ProxyConfig {
    * Path to the shift-ai binary.
    */
   binary?: string;
-
-  /**
-   * Callback fired after images are optimized in a request.
-   */
-  onOptimize?: (metrics: ShiftMetrics[]) => void;
 
   /**
    * Enable verbose logging.
