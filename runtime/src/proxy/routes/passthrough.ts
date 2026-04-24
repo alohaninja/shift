@@ -31,14 +31,29 @@ export function forwardHeaders(
 }
 
 /**
+ * Headers that must be stripped from upstream responses.
+ *
+ * Node's fetch() automatically decompresses response bodies, so the
+ * upstream content-encoding/content-length headers are stale by the time
+ * we forward the response. Passing them through causes clients to attempt
+ * double-decompression (e.g. "Decompression error: ZlibError" in Claude Code).
+ */
+const STRIP_RESPONSE_HEADERS = new Set([
+  "content-encoding",
+  "content-length",
+  "transfer-encoding",
+]);
+
+/**
  * Pipe a fetch Response back through Hono.
  * Streams SSE/chunked responses directly without buffering.
  */
 export function pipeResponse(_c: Context, response: Response): Response {
-  // Create a new Response with the upstream body, status, and headers
   const headers: Record<string, string> = {};
   response.headers.forEach((value, key) => {
-    headers[key] = value;
+    if (!STRIP_RESPONSE_HEADERS.has(key.toLowerCase())) {
+      headers[key] = value;
+    }
   });
 
   return new Response(response.body, {
