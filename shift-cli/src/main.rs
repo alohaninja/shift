@@ -589,8 +589,8 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
                 }
                 println!();
                 println!(
-                    " {:<3}{:<14}{:>6}{:>9}{:>14}{:>8}{:>8}  {}",
-                    "#", "Provider", "Runs", "Images", "Tokens Saved", "Avg%", "Time", "Impact"
+                    " {:<3}{:<14}{:>6}{:>9}{:>14}{:>8}{:>8}  Impact",
+                    "#", "Provider", "Runs", "Images", "Tokens Saved", "Avg%", "Time"
                 );
                 println!(" {}", "─".repeat(70));
                 let max_saved = summary

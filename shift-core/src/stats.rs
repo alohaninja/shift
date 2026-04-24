@@ -407,7 +407,7 @@ pub fn summarize(records: &[RunRecord]) -> GainSummary {
             }
         })
         .collect();
-    by_provider.sort_by(|a, b| b.tokens_saved.cmp(&a.tokens_saved));
+    by_provider.sort_by_key(|b| std::cmp::Reverse(b.tokens_saved));
     s.by_provider = by_provider;
 
     // Build per-action vec sorted by count descending
@@ -415,7 +415,7 @@ pub fn summarize(records: &[RunRecord]) -> GainSummary {
         .into_iter()
         .map(|(action, count)| ActionGain { action, count })
         .collect();
-    by_action.sort_by(|a, b| b.count.cmp(&a.count));
+    by_action.sort_by_key(|b| std::cmp::Reverse(b.count));
     s.by_action = by_action;
 
     s
