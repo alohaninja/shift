@@ -47,7 +47,7 @@ export function createAnthropicHandler(config: ProxyConfig) {
         signal: AbortSignal.timeout(120_000),
       });
 
-      return pipeResponse(c, response);
+      return pipeResponse(response);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`[shift-proxy] Anthropic upstream error: ${msg}`);

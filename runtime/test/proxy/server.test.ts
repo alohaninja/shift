@@ -133,6 +133,9 @@ describe("proxy server", () => {
       });
 
       expect(res.status).toBe(200);
+      // Body must survive response reconstruction intact
+      const body = await res.json();
+      expect(body.id).toBe("msg_123");
       // Transport-layer headers must be stripped — body is already decompressed
       expect(res.headers.get("content-encoding")).toBeNull();
       expect(res.headers.get("content-length")).toBeNull();
@@ -212,6 +215,9 @@ describe("proxy server", () => {
       });
 
       expect(res.status).toBe(200);
+      // Body must survive response reconstruction intact
+      const body = await res.json();
+      expect(body.id).toBe("chatcmpl-123");
       expect(res.headers.get("content-encoding")).toBeNull();
       expect(res.headers.get("content-type")).toBe("application/json");
     });
