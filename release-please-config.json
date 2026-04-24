@@ -13,7 +13,9 @@
           "type": "toml",
           "path": "shift-cli/Cargo.toml",
           "jsonpath": "$.dependencies.shift-preflight.version"
-        }
+        },
+        "docs/index.html",
+        "docs/guide/index.html"
       ]
     }
   }
