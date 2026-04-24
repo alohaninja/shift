@@ -106,6 +106,44 @@ describe("proxy server", () => {
       expect(url).toContain("?beta=true");
     });
 
+    it("strips content-encoding from upstream response to prevent double-decompression", async () => {
+      // Simulate what Anthropic's API actually returns: gzip-encoded response.
+      // Node's fetch() auto-decompresses the body, but the header lingers.
+      // Forwarding it causes clients to double-decompress → ZlibError.
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "msg_123" }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Encoding": "gzip",
+            "Content-Length": "42",
+            "Transfer-Encoding": "chunked",
+          },
+        }),
+      );
+
+      const res = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "test" }],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      // Body must survive response reconstruction intact
+      const body = await res.json();
+      expect(body.id).toBe("msg_123");
+      // Transport-layer headers must be stripped — body is already decompressed
+      expect(res.headers.get("content-encoding")).toBeNull();
+      expect(res.headers.get("content-length")).toBeNull();
+      expect(res.headers.get("transfer-encoding")).toBeNull();
+      // Application-layer headers must still pass through
+      expect(res.headers.get("content-type")).toBe("application/json");
+    });
+
     it("returns 502 when upstream is unreachable", async () => {
       mockFetch.mockRejectedValueOnce(new Error("fetch failed: ECONNREFUSED"));
 
@@ -153,6 +191,35 @@ describe("proxy server", () => {
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain("api.openai.com");
       expect(url).toContain("/v1/chat/completions");
+    });
+
+    it("strips content-encoding from upstream response", async () => {
+      // Use brotli (br) to verify we strip all encodings, not just gzip
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "chatcmpl-123" }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Encoding": "br",
+          },
+        }),
+      );
+
+      const res = await app.request("/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer sk-test",
+        },
+        body: JSON.stringify({ model: "gpt-4o", messages: [] }),
+      });
+
+      expect(res.status).toBe(200);
+      // Body must survive response reconstruction intact
+      const body = await res.json();
+      expect(body.id).toBe("chatcmpl-123");
+      expect(res.headers.get("content-encoding")).toBeNull();
+      expect(res.headers.get("content-type")).toBe("application/json");
     });
 
     it("returns 502 when upstream is unreachable", async () => {
