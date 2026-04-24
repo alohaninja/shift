@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/alohaninja/shift/compare/v0.4.0...v0.4.1) (2026-04-24)
+
+
+### Bug Fixes
+
+* auto-update docs version on release + use shift-ai.dev custom domain ([#14](https://github.com/alohaninja/shift/issues/14)) ([844d724](https://github.com/alohaninja/shift/commit/844d72499f3156d7b7ad92b479e646dc4444db21))
+
 ## [0.4.0](https://github.com/alohaninja/shift/compare/v0.3.0...v0.4.0) (2026-04-24)
 
 
