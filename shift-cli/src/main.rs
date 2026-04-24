@@ -650,6 +650,19 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
                     );
                 }
             }
+
+            // ── Daily sparkline (last 30 days) ───────────────────────
+            let days = shift_preflight::stats::daily_breakdown(&records);
+            if days.len() > 1 {
+                println!();
+                if use_color {
+                    println!("{}", "Last 30 Days".bold().green());
+                } else {
+                    println!("Last 30 Days");
+                }
+                println!();
+                print_sparkline(&days, use_color);
+            }
         }
     }
 
@@ -673,6 +686,65 @@ fn print_efficiency_meter(pct: f64, use_color: bool) {
         );
     } else {
         println!("{:<18}{} {}", "Efficiency meter:", meter, pct_str,);
+    }
+}
+
+/// Print an ASCII sparkline graph of daily token savings (last 30 days).
+fn print_sparkline(days: &[shift_preflight::stats::DailyGain], use_color: bool) {
+    use colored::Colorize;
+
+    // Take last 30 days
+    let days: Vec<_> = if days.len() > 30 {
+        days[days.len() - 30..].to_vec()
+    } else {
+        days.to_vec()
+    };
+
+    // Use combined tokens saved (best of openai/anthropic per day)
+    let values: Vec<(String, u64)> = days
+        .iter()
+        .map(|d| {
+            let saved = d.openai_saved.max(d.anthropic_saved);
+            // Shorten date: "2026-04-23" -> "04-23"
+            let short = if d.date.len() >= 10 {
+                d.date[5..10].to_string()
+            } else {
+                d.date.clone()
+            };
+            (short, saved)
+        })
+        .collect();
+
+    let max_val = values.iter().map(|(_, v)| *v).max().unwrap_or(1).max(1);
+    let bar_width = 36usize;
+
+    for (date, value) in &values {
+        let filled = ((*value as f64 / max_val as f64) * bar_width as f64).round() as usize;
+        let filled = filled.min(bar_width);
+        let bar = "█".repeat(filled);
+        let tokens = fmt_short_tokens(*value);
+        if use_color {
+            println!(
+                " {} │{:<width$} {}",
+                date,
+                bar.cyan(),
+                tokens,
+                width = bar_width
+            );
+        } else {
+            println!(" {} │{:<width$} {}", date, bar, tokens, width = bar_width);
+        }
+    }
+}
+
+/// Format tokens in compact form: 1.2K, 3.5M, etc.
+fn fmt_short_tokens(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        format!("{}", n)
     }
 }
 

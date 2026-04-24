@@ -17,6 +17,9 @@ const MAX_STATS_RECORDS: usize = 100_000;
 /// Lines longer than this are skipped as likely corrupt.
 const MAX_LINE_LENGTH: usize = 65_536;
 
+/// Records older than this many days are automatically purged.
+const RETENTION_DAYS: u64 = 90;
+
 use crate::cost::TokenSavings;
 
 /// A single run record persisted to the stats file.
@@ -204,7 +207,68 @@ pub fn record_run(record: &RunRecord, path: Option<&PathBuf>) -> Result<()> {
         .context("failed to write to stats file")?;
     file.flush().context("failed to flush stats file")?;
 
+    // Drop the file handle before purging (purge needs exclusive access)
+    drop(file);
+
+    // Auto-purge records older than RETENTION_DAYS.
+    // Only run when the file exceeds 50KB to amortize the cost.
+    if let Ok(meta) = fs::metadata(&stats_path) {
+        if meta.len() > 50_000 {
+            let _ = purge_old_records(&stats_path);
+        }
+    }
+
     Ok(())
+}
+
+/// Remove records older than RETENTION_DAYS from the stats file.
+///
+/// Reads all records, filters to those within the retention window,
+/// and rewrites the file atomically via a temp file + rename.
+pub fn purge_old_records(path: &PathBuf) -> Result<usize> {
+    let cutoff_date = {
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let cutoff_secs = now_secs.saturating_sub(RETENTION_DAYS * 86400);
+        let (y, m, d) = days_to_ymd(cutoff_secs / 86400);
+        format!("{:04}-{:02}-{:02}", y, m, d)
+    };
+
+    let load_result = load_records(Some(path))?;
+    let total = load_result.records.len();
+    let kept: Vec<&RunRecord> = load_result
+        .records
+        .iter()
+        .filter(|r| r.date >= cutoff_date)
+        .collect();
+    let purged = total - kept.len();
+
+    if purged == 0 {
+        return Ok(0);
+    }
+
+    // Write to a temp file in the same directory, then rename atomically
+    let parent = path
+        .parent()
+        .context("stats file has no parent directory")?;
+    let tmp_path = parent.join(".stats.jsonl.tmp");
+
+    {
+        let mut tmp_file =
+            fs::File::create(&tmp_path).context("failed to create temp file for purge")?;
+        for record in &kept {
+            let mut line = serde_json::to_string(record)?;
+            line.push('\n');
+            tmp_file.write_all(line.as_bytes())?;
+        }
+        tmp_file.flush()?;
+    }
+
+    fs::rename(&tmp_path, path).context("failed to rename purged stats file")?;
+
+    Ok(purged)
 }
 
 /// Result of loading stats records, including count of skipped malformed lines.
