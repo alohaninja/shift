@@ -109,6 +109,34 @@ Date          Runs  Images    OpenAI saved Anthropic saved
 
 Use `shift-ai gain --format json` for machine-readable output.
 
+## Runtime: AI SDK Middleware + HTTP Proxy
+
+The `@shift-ai/runtime` package (`runtime/` directory) provides two ways to integrate SHIFT into any AI agent or application:
+
+**AI SDK Middleware** — transparent, in-process optimization for any [Vercel AI SDK](https://sdk.vercel.ai) app:
+
+```typescript
+import { shiftMiddleware } from "@shift-ai/runtime";
+import { wrapLanguageModel } from "ai";
+
+const model = wrapLanguageModel({
+  model: anthropic("claude-sonnet-4-20250514"),
+  middleware: shiftMiddleware({ mode: "balanced" }),
+});
+```
+
+**HTTP Proxy** — transparent reverse proxy for any agent in any language:
+
+```bash
+npx @shift-ai/runtime proxy --port 8787 --mode balanced
+
+# Point any agent at the proxy:
+export ANTHROPIC_BASE_URL=http://localhost:8787
+export OPENAI_BASE_URL=http://localhost:8787
+```
+
+See [`runtime/README.md`](runtime/README.md) for full documentation.
+
 ## Install
 
 ### Homebrew (macOS/Linux)
