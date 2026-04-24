@@ -1,5 +1,5 @@
 /**
- * Shared types for @shift-ai/runtime.
+ * Shared types for @shift-preflight/runtime.
  */
 
 /** SHIFT drive modes — controls aggressiveness of optimization. */

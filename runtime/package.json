@@ -1,5 +1,5 @@
 {
-  "name": "@shift-ai/runtime",
+  "name": "@shift-preflight/runtime",
   "version": "0.1.0",
   "description": "Multimodal preflight for any AI agent — AI SDK middleware + HTTP proxy",
   "type": "module",

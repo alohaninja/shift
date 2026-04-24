@@ -9,7 +9,7 @@ describe("proxy server", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe("ok");
-    expect(body.service).toBe("@shift-ai/runtime proxy");
+    expect(body.service).toBe("@shift-preflight/runtime proxy");
   });
 
   it("returns 404 for unknown routes", async () => {

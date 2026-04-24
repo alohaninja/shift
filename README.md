@@ -111,12 +111,12 @@ Use `shift-ai gain --format json` for machine-readable output.
 
 ## Runtime: AI SDK Middleware + HTTP Proxy
 
-The `@shift-ai/runtime` package (`runtime/` directory) provides two ways to integrate SHIFT into any AI agent or application:
+The `@shift-preflight/runtime` package (`runtime/` directory) provides two ways to integrate SHIFT into any AI agent or application:
 
 **AI SDK Middleware** — transparent, in-process optimization for any [Vercel AI SDK](https://sdk.vercel.ai) app:
 
 ```typescript
-import { shiftMiddleware } from "@shift-ai/runtime";
+import { shiftMiddleware } from "@shift-preflight/runtime";
 import { wrapLanguageModel } from "ai";
 
 const model = wrapLanguageModel({
@@ -128,7 +128,7 @@ const model = wrapLanguageModel({
 **HTTP Proxy** — transparent reverse proxy for any agent in any language:
 
 ```bash
-npx @shift-ai/runtime proxy --port 8787 --mode balanced
+npx @shift-preflight/runtime proxy --port 8787 --mode balanced
 
 # Point any agent at the proxy:
 export ANTHROPIC_BASE_URL=http://localhost:8787

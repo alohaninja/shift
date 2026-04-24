@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * CLI entry point for @shift-ai/runtime.
+ * CLI entry point for @shift-preflight/runtime.
  *
  * Usage:
- *   npx @shift-ai/runtime proxy [options]
+ *   npx @shift-preflight/runtime proxy [options]
  *   shift-runtime proxy --port 8787 --mode balanced --verbose
  */
 
@@ -37,7 +37,7 @@ function getFlag(args: string[], flag: string, defaultValue: string): string {
 
 function printHelp() {
   console.log(`
-@shift-ai/runtime — Multimodal preflight for any AI agent
+@shift-preflight/runtime — Multimodal preflight for any AI agent
 
 USAGE:
   shift-runtime proxy [OPTIONS]
@@ -53,10 +53,10 @@ OPTIONS:
 
 EXAMPLES:
   # Start proxy with defaults
-  npx @shift-ai/runtime proxy
+  npx @shift-preflight/runtime proxy
 
   # Start proxy on port 9000 in economy mode
-  npx @shift-ai/runtime proxy --port 9000 --mode economy
+  npx @shift-preflight/runtime proxy --port 9000 --mode economy
 
   # Then point your agent at the proxy:
   export ANTHROPIC_BASE_URL=http://localhost:8787

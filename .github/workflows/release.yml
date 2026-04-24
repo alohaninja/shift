@@ -152,6 +152,34 @@ jobs:
           echo "Failed to publish shift-preflight-cli after 5 attempts" >&2
           exit 1
 
+  # ── Publish to npm ────────────────────────────────────────────
+  publish-npm:
+    needs: [release-please]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions: {}
+    defaults:
+      run:
+        working-directory: runtime
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+          cache-dependency-path: runtime/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+      - name: Publish @shift-preflight/runtime
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
   # ── Update Homebrew formula ──────────────────────────────────
   update-homebrew:
     needs: [release-please, publish-release]

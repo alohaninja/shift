@@ -33,7 +33,7 @@ function assert(label: string, ok: boolean, detail?: string) {
 }
 
 async function main() {
-  console.log("\n=== @shift-ai/runtime Integration Validation ===\n");
+  console.log("\n=== @shift-preflight/runtime Integration Validation ===\n");
 
   // 1. Core: shift-ai binary detection
   console.log("Core: binary detection");

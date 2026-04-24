@@ -75,6 +75,33 @@ jobs:
           echo "### Binary size (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
           echo "shift-ai: $(echo $SIZE | awk '{printf "%.1f MB", $1/1048576}')" >> $GITHUB_STEP_SUMMARY
 
+  # ── Runtime (TypeScript) ──────────────────────────────────
+  runtime:
+    name: Runtime
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: runtime
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: runtime/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Run tests
+        run: npm test 2>&1 | tee test-output.txt
+      - name: Summarize test results
+        if: always()
+        run: |
+          echo "### Runtime Test Results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -5 test-output.txt >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
   # ── Security audit ─────────────────────────────────────────
   audit:
     name: Security Audit
@@ -92,7 +119,7 @@ jobs:
   ci-pass:
     name: CI Pass
     if: always()
-    needs: [fmt, clippy, test, build]
+    needs: [fmt, clippy, test, build, runtime]
     runs-on: ubuntu-latest
     steps:
       - name: Check results
@@ -101,10 +128,12 @@ jobs:
           echo "clippy:  ${{ needs.clippy.result }}"
           echo "test:    ${{ needs.test.result }}"
           echo "build:   ${{ needs.build.result }}"
+          echo "runtime: ${{ needs.runtime.result }}"
           if [[ "${{ needs.fmt.result }}" != "success" ]] || \
              [[ "${{ needs.clippy.result }}" != "success" ]] || \
              [[ "${{ needs.test.result }}" != "success" ]] || \
-             [[ "${{ needs.build.result }}" != "success" ]]; then
+             [[ "${{ needs.build.result }}" != "success" ]] || \
+             [[ "${{ needs.runtime.result }}" != "success" ]]; then
             echo "::error::One or more CI jobs failed"
             exit 1
           fi

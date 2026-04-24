@@ -2,12 +2,12 @@
  * HTTP Proxy — transparent image optimization for ANY AI agent.
  *
  * Usage:
- *   import { startProxy } from "@shift-ai/runtime/proxy";
+ *   import { startProxy } from "@shift-preflight/runtime/proxy";
  *
  *   const server = await startProxy({ port: 8787, mode: "balanced" });
  *
  * Or via CLI:
- *   npx @shift-ai/runtime proxy --port 8787 --mode balanced
+ *   npx @shift-preflight/runtime proxy --port 8787 --mode balanced
  *
  * Then point your agent's API base URL at http://localhost:8787
  */

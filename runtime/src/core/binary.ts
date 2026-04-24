@@ -34,7 +34,7 @@ export async function isShiftAvailable(
     if (!_warned) {
       _warned = true;
       console.warn(
-        "[@shift-ai/runtime] shift-ai binary not found. Images will pass through unoptimized.\n" +
+        "[@shift-preflight/runtime] shift-ai binary not found. Images will pass through unoptimized.\n" +
           "  Install: brew install alohaninja/shift/shift-ai\n" +
           "  More info: https://shift-ai.dev",
       );

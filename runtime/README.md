@@ -1,4 +1,4 @@
-# @shift-ai/runtime
+# @shift-preflight/runtime
 
 Multimodal preflight for any AI agent — transparent image optimization before images reach the LLM.
 
@@ -12,7 +12,7 @@ Both use [SHIFT](https://shift-ai.dev/) (`shift-ai` CLI) as the optimization eng
 ## Install
 
 ```bash
-npm install @shift-ai/runtime
+npm install @shift-preflight/runtime
 
 # SHIFT CLI is required for optimization (graceful no-op if missing)
 brew install alohaninja/shift/shift-ai
@@ -21,7 +21,7 @@ brew install alohaninja/shift/shift-ai
 ## Mode 1: AI SDK Middleware
 
 ```typescript
-import { shiftMiddleware } from "@shift-ai/runtime";
+import { shiftMiddleware } from "@shift-preflight/runtime";
 import { wrapLanguageModel, generateText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 
@@ -63,7 +63,7 @@ shiftMiddleware({
 ## Mode 2: HTTP Proxy
 
 ```bash
-npx @shift-ai/runtime proxy --port 8787 --mode balanced
+npx @shift-preflight/runtime proxy --port 8787 --mode balanced
 ```
 
 Then point your agent at `http://localhost:8787`:
@@ -93,7 +93,7 @@ The proxy intercepts requests, optimizes images via SHIFT, and forwards to the r
 ### Programmatic
 
 ```typescript
-import { startProxy } from "@shift-ai/runtime/proxy";
+import { startProxy } from "@shift-preflight/runtime/proxy";
 
 const server = await startProxy({
   port: 8787,

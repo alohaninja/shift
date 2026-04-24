@@ -2,7 +2,7 @@
  * AI SDK Middleware — transparent image optimization for any AI SDK app.
  *
  * Usage:
- *   import { shiftMiddleware } from "@shift-ai/runtime";
+ *   import { shiftMiddleware } from "@shift-preflight/runtime";
  *   import { wrapLanguageModel } from "ai";
  *
  *   const model = wrapLanguageModel({

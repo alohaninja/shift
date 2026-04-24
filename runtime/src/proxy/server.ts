@@ -28,7 +28,7 @@ export function createProxyApp(config: ProxyConfig = {}): Hono {
 
   // Health check
   app.get("/health", (c) =>
-    c.json({ status: "ok", service: "@shift-ai/runtime proxy" }),
+    c.json({ status: "ok", service: "@shift-preflight/runtime proxy" }),
   );
 
   // Anthropic

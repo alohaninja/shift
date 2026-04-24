@@ -1,11 +1,11 @@
 /**
- * @shift-ai/runtime — Multimodal preflight for any AI agent.
+ * @shift-preflight/runtime — Multimodal preflight for any AI agent.
  *
  * Two integration modes:
  *
  * 1. AI SDK Middleware (in-process, transparent):
  *    ```typescript
- *    import { shiftMiddleware } from "@shift-ai/runtime";
+ *    import { shiftMiddleware } from "@shift-preflight/runtime";
  *    const model = wrapLanguageModel({
  *      model: anthropic("claude-sonnet-4-20250514"),
  *      middleware: shiftMiddleware({ mode: "balanced" }),
@@ -14,7 +14,7 @@
  *
  * 2. HTTP Proxy (any agent, any language):
  *    ```typescript
- *    import { startProxy } from "@shift-ai/runtime/proxy";
+ *    import { startProxy } from "@shift-preflight/runtime/proxy";
  *    await startProxy({ port: 8787, mode: "balanced" });
  *    ```
  *    Then set: ANTHROPIC_BASE_URL=http://localhost:8787

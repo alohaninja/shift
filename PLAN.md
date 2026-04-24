@@ -350,13 +350,13 @@ shift request.json -p openai | curl -X POST https://api.openai.com/v1/chat/compl
 32. `.github/workflows/ci.yml`
 33. Initial commit + push
 
-### Phase 9: Runtime — TypeScript Package (`@shift-ai/runtime`)
+### Phase 9: Runtime — TypeScript Package (`@shift-preflight/runtime`)
 
 34. `runtime/package.json` + tsconfig + tsup + vitest scaffolding
 35. `runtime/src/core/` — binary detection, data-convert, provider-detect, metrics, optimizer
 36. `runtime/src/middleware/` — AI SDK `LanguageModelV3Middleware` with `transformParams`
 37. `runtime/src/proxy/` — Hono reverse proxy with Anthropic, OpenAI, Google routes
-38. `runtime/src/cli.ts` — `npx @shift-ai/runtime proxy` entry point
+38. `runtime/src/cli.ts` — `npx @shift-preflight/runtime proxy` entry point
 39. `profiles/google.json` — Gemini provider constraints
 40. Tests for core, middleware, proxy (51 tests)
 41. `runtime/README.md` with middleware + proxy usage docs
@@ -384,7 +384,7 @@ shift request.json -p openai | curl -X POST https://api.openai.com/v1/chat/compl
 - [ ] Dry-run mode shows report without modifying payload
 - [ ] All unit tests pass
 - [ ] CI runs cargo check + clippy + test
-- [ ] `@shift-ai/runtime` builds and typechecks cleanly
+- [ ] `@shift-preflight/runtime` builds and typechecks cleanly
 - [ ] AI SDK middleware transparently optimizes images in `transformParams`
 - [ ] HTTP proxy forwards Anthropic/OpenAI requests with optimized images
 - [ ] Proxy passes through auth headers and SSE streams unchanged
