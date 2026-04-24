@@ -16,6 +16,7 @@
   <a href="https://github.com/alohaninja/shift/actions"><img src="https://github.com/alohaninja/shift/workflows/CI/badge.svg" alt="CI"></a>
   <a href="https://github.com/alohaninja/shift/releases"><img src="https://img.shields.io/github/v/release/alohaninja/shift" alt="Release"></a>
   <a href="https://crates.io/crates/shift-preflight-cli"><img src="https://img.shields.io/crates/v/shift-preflight-cli" alt="crates.io"></a>
+  <a href="https://www.npmjs.com/package/@shift-preflight/runtime"><img src="https://img.shields.io/npm/v/@shift-preflight/runtime" alt="npm"></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
 </p>
 
@@ -108,6 +109,35 @@ Date          Runs  Images    OpenAI saved Anthropic saved
 ```
 
 Use `shift-ai gain --format json` for machine-readable output.
+
+## Runtime: AI SDK Middleware + HTTP Proxy
+
+The `@shift-preflight/runtime` package (`runtime/` directory) provides two ways to integrate SHIFT into any AI agent or application:
+
+**AI SDK Middleware** — transparent, in-process optimization for any [Vercel AI SDK](https://sdk.vercel.ai) app:
+
+```typescript
+import { shiftMiddleware } from "@shift-preflight/runtime";
+import { wrapLanguageModel } from "ai";
+
+const model = wrapLanguageModel({
+  model: anthropic("claude-sonnet-4-20250514"),
+  middleware: shiftMiddleware({ mode: "balanced" }),
+});
+```
+
+**HTTP Proxy** — transparent reverse proxy for any agent in any language:
+
+```bash
+npx @shift-preflight/runtime proxy --port 8787 --mode balanced
+
+# Point any agent at the proxy:
+export ANTHROPIC_BASE_URL=http://localhost:8787   # Claude Code
+export OPENAI_BASE_URL=http://localhost:8787       # Codex CLI
+export GEMINI_API_BASE=http://localhost:8787        # Gemini CLI
+```
+
+See [`runtime/README.md`](runtime/README.md) for full documentation.
 
 ## Install
 

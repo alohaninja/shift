@@ -138,3 +138,33 @@ shift-ai gain              # summary
 shift-ai gain --daily      # day-by-day breakdown
 shift-ai gain --format json  # machine-readable
 ```
+
+## Alternative: Runtime proxy
+
+For agents that support setting a base URL (Claude Code, Codex CLI, Gemini CLI, Aider, etc.), the `@shift-preflight/runtime` package provides a transparent HTTP proxy that handles optimization automatically — no need to manually run `shift-ai preflight` and `shift-ai` on each payload.
+
+```bash
+# Start the proxy
+npx @shift-preflight/runtime proxy --port 8787 --mode balanced
+
+# Point the agent at the proxy
+export ANTHROPIC_BASE_URL=http://localhost:8787
+export OPENAI_BASE_URL=http://localhost:8787
+```
+
+For Vercel AI SDK apps (OpenCode, Next.js), use the middleware instead:
+
+```typescript
+import { shiftMiddleware } from "@shift-preflight/runtime";
+import { wrapLanguageModel } from "ai";
+
+const model = wrapLanguageModel({
+  model: anthropic("claude-sonnet-4-20250514"),
+  middleware: shiftMiddleware({ mode: "balanced" }),
+});
+```
+
+**When to use the CLI skill vs. the runtime:**
+- Use **this skill** (CLI) when you need fine-grained control: preflight inspection, manual optimization decisions, custom pipelines.
+- Use the **runtime proxy** when you want set-and-forget optimization for an entire agent session.
+- Use the **runtime middleware** when you're building a Vercel AI SDK app and want in-process optimization.

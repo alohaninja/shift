@@ -1,0 +1,81 @@
+{
+  "name": "@shift-preflight/runtime",
+  "version": "0.1.0",
+  "description": "Multimodal preflight for any AI agent — AI SDK middleware + HTTP proxy",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./middleware": {
+      "import": "./dist/middleware/index.js",
+      "types": "./dist/middleware/index.d.ts"
+    },
+    "./proxy": {
+      "import": "./dist/proxy/index.js",
+      "types": "./dist/proxy/index.d.ts"
+    }
+  },
+  "bin": {
+    "shift-runtime": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "proxy": "tsx src/cli.ts proxy"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.0",
+    "hono": "^4.7.0"
+  },
+  "peerDependencies": {
+    "@ai-sdk/provider": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@ai-sdk/provider": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "^1.1.0",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  },
+  "keywords": [
+    "ai",
+    "ai-sdk",
+    "middleware",
+    "proxy",
+    "image-optimization",
+    "multimodal",
+    "anthropic",
+    "openai",
+    "gemini",
+    "shift",
+    "token-optimization"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alohaninja/shift",
+    "directory": "runtime"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,5 +1,9 @@
 /target
 *.swp
+
+# Runtime (TypeScript)
+runtime/node_modules/
+runtime/dist/
 *.swo
 *~
 .DS_Store

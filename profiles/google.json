@@ -1,0 +1,29 @@
+{
+  "name": "google",
+  "models": {
+    "gemini-2.5-pro": {
+      "max_images": 16,
+      "max_image_dim": 3072,
+      "max_image_size_bytes": 20971520,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    },
+    "gemini-2.5-flash": {
+      "max_images": 16,
+      "max_image_dim": 3072,
+      "max_image_size_bytes": 20971520,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    },
+    "gemini-2.0-flash": {
+      "max_images": 16,
+      "max_image_dim": 3072,
+      "max_image_size_bytes": 20971520,
+      "supported_formats": ["png", "jpeg", "gif", "webp"]
+    }
+  },
+  "default": {
+    "max_images": 16,
+    "max_image_dim": 3072,
+    "max_image_size_bytes": 20971520,
+    "supported_formats": ["png", "jpeg", "gif", "webp"]
+  }
+}

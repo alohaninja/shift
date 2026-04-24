@@ -549,6 +549,47 @@
     </div>
   </section>
 
+  <!-- Integration -->
+  <section class="modes-section" id="integration">
+    <div class="section-inner reveal">
+      <h2>Works with any AI agent</h2>
+      <p class="section-sub">CLI, middleware, or proxy &mdash; pick the integration that fits your stack.</p>
+
+      <div class="modes-grid">
+        <div class="mode-card">
+          <span class="mode-badge mode-perf">CLI</span>
+          <h3 style="color: #22c55e;">Pipe &amp; transform</h3>
+          <p>Pipe any JSON payload through <code>shift-ai</code> directly. Works with any language or toolchain.</p>
+          <div style="margin-top: 16px; padding: 12px; background: var(--bg-alt); border-radius: 8px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted);">
+            cat request.json | shift-ai -p anthropic
+          </div>
+        </div>
+        <div class="mode-card" style="border-color: rgba(56, 189, 248, 0.3);">
+          <span class="mode-badge mode-bal">MIDDLEWARE</span>
+          <h3 style="color: var(--cyan);">AI SDK drop-in</h3>
+          <p>In-process middleware for any <a href="https://sdk.vercel.ai" target="_blank" rel="noopener" style="color: var(--cyan);">Vercel AI SDK</a> app. Zero config, auto-detects provider.</p>
+          <div style="margin-top: 16px; padding: 12px; background: var(--bg-alt); border-radius: 8px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted);">
+            shiftMiddleware({ mode: "balanced" })
+          </div>
+        </div>
+        <div class="mode-card">
+          <span class="mode-badge mode-eco">PROXY</span>
+          <h3 style="color: var(--orange);">Universal agent proxy</h3>
+          <p>Transparent HTTP proxy for Claude Code, Codex CLI, Gemini CLI, Aider &mdash; any agent that accepts a base URL.</p>
+          <div style="margin-top: 16px; padding: 12px; background: var(--bg-alt); border-radius: 8px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted);">
+            ANTHROPIC_BASE_URL=http://localhost:8787
+          </div>
+        </div>
+      </div>
+
+      <p style="text-align:center;margin-top:28px;font-size:0.88rem;color:var(--text-muted);">
+        Runtime package: <code style="color:var(--accent);">npm install @shift-preflight/runtime</code>
+        &nbsp;&middot;&nbsp;
+        <a href="guide/#runtime" style="font-weight:600;">Full runtime guide &rarr;</a>
+      </p>
+    </div>
+  </section>
+
   <!-- Install -->
   <section class="install-section" id="install">
     <div class="section-inner reveal">
@@ -613,7 +654,7 @@
   <section class="cta-section">
     <div class="section-inner reveal">
       <h2>Stop wasting tokens<br>on <span class="gradient-text">oversized images</span></h2>
-      <p class="section-sub" style="margin-bottom:36px;">One binary. Zero config. Works with OpenAI and Anthropic out of the box.</p>
+      <p class="section-sub" style="margin-bottom:36px;">One binary, three integration modes. Works with OpenAI, Anthropic, and Google out of the box.</p>
       <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
         <a href="#install" class="btn btn-primary">Install SHIFT</a>
         <a href="https://github.com/alohaninja/shift" class="btn btn-ghost" target="_blank" rel="noopener">View source</a>
