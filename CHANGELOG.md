@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.0](https://github.com/alohaninja/shift/compare/v0.1.4...v0.2.0) (2026-04-24)
+
+
+### Features
+
+* publish shift-ai-preflight skill to skills.sh ([2003a05](https://github.com/alohaninja/shift/commit/2003a05a7f223efd341e2c914c0f9768e8c85463))
+
+
+### Bug Fixes
+
+* revert to 0.1.4 and add shift-cli dep version to release-please extra-files ([71d3f90](https://github.com/alohaninja/shift/commit/71d3f90f75f389c0ab6611a7f400746a71143b4d))
+* update shift-preflight dependency to ^0.2 (unblocks release build) ([93bce7f](https://github.com/alohaninja/shift/commit/93bce7f65e20b8bf23203eaaef3ff7c344b9d67d))
+
 ## [0.1.4](https://github.com/alohaninja/shift/compare/v0.1.3...v0.1.4) (2026-04-23)
 
 
