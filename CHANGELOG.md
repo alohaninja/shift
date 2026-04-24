@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/alohaninja/shift/compare/v0.5.0...v0.5.1) (2026-04-24)
+
+
+### Bug Fixes
+
+* strip content-encoding from proxied responses to prevent ZlibError ([#18](https://github.com/alohaninja/shift/issues/18)) ([4a5696f](https://github.com/alohaninja/shift/commit/4a5696f8b68b449cdcbfc70b61fb518c8b73267f))
+
 ## [0.5.0](https://github.com/alohaninja/shift/compare/v0.4.1...v0.5.0) (2026-04-24)
 
 
