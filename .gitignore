@@ -3,3 +3,37 @@
 *.swo
 *~
 .DS_Store
+
+# Agent-specific skill directories (created by `npx skills add`)
+# The canonical source is .agents/skills/ — these are redundant symlinks.
+# Agents that read from .agents/skills/ (OpenCode, Cursor, Codex, Amp,
+# Cline, Gemini CLI, GitHub Copilot, etc.) already work without these.
+.adal/
+.augment/
+.bob/
+.claude/skills/
+.codebuddy/
+.commandcode/
+.continue/
+.cortex/
+.crush/
+.factory/
+.goose/
+.iflow/
+.junie/
+.kilocode/
+.kiro/
+.kode/
+.mcpjam/
+.mux/
+.neovate/
+.openhands/
+.pi/
+.pochi/
+.qoder/
+.qwen/
+.roo/
+.trae/
+.vibe/
+.windsurf/
+.zencoder/
