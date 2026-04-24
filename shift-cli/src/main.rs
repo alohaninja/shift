@@ -472,7 +472,7 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
                         "runs": p.runs,
                         "images": p.images,
                         "tokens_saved": p.tokens_saved,
-                        "avg_pct": p.avg_pct,
+                        "overall_pct": p.overall_pct,
                         "avg_duration_ms": p.avg_duration_ms,
                     })
                 }).collect::<Vec<_>>(),
@@ -536,7 +536,7 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
                         "OpenAI tokens:",
                         fmt_tokens(summary.total_openai_before),
                         fmt_tokens(summary.total_openai_after),
-                        colorize_pct(&pct_str, summary.openai_pct()),
+                        colorize_pct(&pct_str, summary.openai_pct(), use_color),
                     );
                 } else {
                     println!(
@@ -556,7 +556,7 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
                         "Anthropic tokens:",
                         fmt_tokens(summary.total_anthropic_before),
                         fmt_tokens(summary.total_anthropic_after),
-                        colorize_pct(&pct_str, summary.anthropic_pct()),
+                        colorize_pct(&pct_str, summary.anthropic_pct(), use_color),
                     );
                 } else {
                     println!(
@@ -600,7 +600,7 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
                     .max()
                     .unwrap_or(1);
                 for (i, p) in summary.by_provider.iter().enumerate() {
-                    let pct_str = format!("{:.1}%", p.avg_pct);
+                    let pct_str = format!("{:.1}%", p.overall_pct);
                     let bar = mini_bar(p.tokens_saved, max_saved, 10, use_color);
                     if use_color {
                         println!(
@@ -610,7 +610,7 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
                             p.runs,
                             p.images,
                             fmt_tokens(p.tokens_saved),
-                            colorize_pct(&pct_str, p.avg_pct),
+                            colorize_pct(&pct_str, p.overall_pct, use_color),
                             fmt_duration(p.avg_duration_ms),
                             bar,
                         );
@@ -682,7 +682,7 @@ fn print_efficiency_meter(pct: f64, use_color: bool) {
             "{:<18}{} {}",
             "Efficiency meter:",
             meter.green(),
-            colorize_pct(&pct_str, pct),
+            colorize_pct(&pct_str, pct, use_color),
         );
     } else {
         println!("{:<18}{} {}", "Efficiency meter:", meter, pct_str,);
@@ -749,9 +749,9 @@ fn fmt_short_tokens(n: u64) -> String {
 }
 
 /// Color a percentage string by tier: green >= 50%, yellow >= 20%, red < 20%.
-fn colorize_pct(s: &str, pct: f64) -> String {
+fn colorize_pct(s: &str, pct: f64, use_color: bool) -> String {
     use colored::Colorize;
-    if !std::io::stdout().is_terminal() {
+    if !use_color {
         return s.to_string();
     }
     if pct >= 50.0 {
