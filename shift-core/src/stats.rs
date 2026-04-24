@@ -17,6 +17,9 @@ const MAX_STATS_RECORDS: usize = 100_000;
 /// Lines longer than this are skipped as likely corrupt.
 const MAX_LINE_LENGTH: usize = 65_536;
 
+/// Records older than this many days are automatically purged.
+const RETENTION_DAYS: u64 = 90;
+
 use crate::cost::TokenSavings;
 
 /// A single run record persisted to the stats file.
@@ -43,6 +46,12 @@ pub struct RunRecord {
     pub bytes_after: usize,
     /// Token savings
     pub token_savings: TokenSavings,
+    /// Pipeline execution time in milliseconds
+    #[serde(default)]
+    pub duration_ms: u64,
+    /// Per-action counts: (action_name, count)
+    #[serde(default)]
+    pub action_counts: Vec<(String, usize)>,
 }
 
 /// Aggregated gain summary.
@@ -57,6 +66,30 @@ pub struct GainSummary {
     pub total_openai_after: u64,
     pub total_anthropic_before: u64,
     pub total_anthropic_after: u64,
+    pub total_duration_ms: u64,
+    /// Per-provider breakdown sorted by tokens saved descending.
+    pub by_provider: Vec<ProviderGain>,
+    /// Per-action breakdown sorted by count descending.
+    pub by_action: Vec<ActionGain>,
+}
+
+/// Per-provider aggregated stats.
+#[derive(Debug, Clone)]
+pub struct ProviderGain {
+    pub provider: String,
+    pub runs: usize,
+    pub images: usize,
+    pub tokens_saved: u64,
+    /// Aggregate savings percentage: (total_saved / total_before) * 100.
+    pub overall_pct: f64,
+    pub avg_duration_ms: u64,
+}
+
+/// Per-action aggregated stats.
+#[derive(Debug, Clone)]
+pub struct ActionGain {
+    pub action: String,
+    pub count: usize,
 }
 
 /// Daily aggregation bucket.
@@ -175,7 +208,83 @@ pub fn record_run(record: &RunRecord, path: Option<&PathBuf>) -> Result<()> {
         .context("failed to write to stats file")?;
     file.flush().context("failed to flush stats file")?;
 
+    // Drop the file handle before purging (purge needs exclusive access)
+    drop(file);
+
+    // Auto-purge records older than RETENTION_DAYS.
+    // Only run when the file exceeds 50KB to amortize the cost.
+    if let Ok(meta) = fs::metadata(&stats_path) {
+        if meta.len() > 50_000 {
+            if let Err(e) = purge_old_records(&stats_path) {
+                eprintln!("shift-ai: warning: auto-purge failed: {}", e);
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// Remove records older than RETENTION_DAYS from the stats file.
+///
+/// Reads all records, filters to those within the retention window,
+/// and rewrites the file atomically via a temp file + rename.
+///
+/// Uses `tempfile::NamedTempFile` for a unique temp filename (safe under
+/// concurrent invocations) and auto-cleanup on failure. Calls `sync_all()`
+/// before `persist()` to ensure data durability before the rename.
+pub fn purge_old_records(path: &PathBuf) -> Result<usize> {
+    let cutoff_date = {
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let cutoff_secs = now_secs.saturating_sub(RETENTION_DAYS * 86400);
+        let (y, m, d) = days_to_ymd(cutoff_secs / 86400);
+        format!("{:04}-{:02}-{:02}", y, m, d)
+    };
+
+    let load_result = load_records(Some(path))?;
+    let total = load_result.records.len();
+    let kept: Vec<&RunRecord> = load_result
+        .records
+        .iter()
+        .filter(|r| r.date >= cutoff_date)
+        .collect();
+    let purged = total - kept.len();
+
+    if purged == 0 {
+        return Ok(0);
+    }
+
+    // Write to a unique temp file in the same directory. NamedTempFile
+    // auto-deletes on drop if persist() is never called, so crashes and
+    // errors never leave orphaned files behind.
+    let parent = path
+        .parent()
+        .context("stats file has no parent directory")?;
+    let mut tmp_file =
+        tempfile::NamedTempFile::new_in(parent).context("failed to create temp file for purge")?;
+
+    for record in &kept {
+        let mut line = serde_json::to_string(record)?;
+        line.push('\n');
+        tmp_file.write_all(line.as_bytes())?;
+    }
+    tmp_file.flush()?;
+
+    // Ensure data reaches persistent storage before the atomic rename
+    tmp_file
+        .as_file()
+        .sync_all()
+        .context("failed to sync temp file")?;
+
+    // persist() atomically renames the temp file over the target path.
+    // On failure the temp file is still auto-cleaned up by Drop.
+    tmp_file
+        .persist(path)
+        .context("failed to rename purged stats file")?;
+
+    Ok(purged)
 }
 
 /// Result of loading stats records, including count of skipped malformed lines.
@@ -250,7 +359,15 @@ pub fn load_records(path: Option<&PathBuf>) -> Result<LoadResult> {
 
 /// Compute aggregate gain summary from records.
 pub fn summarize(records: &[RunRecord]) -> GainSummary {
+    use std::collections::BTreeMap;
+
     let mut s = GainSummary::default();
+
+    // Per-provider accumulators: (runs, images, tokens_before, tokens_after, total_duration_ms)
+    let mut providers: BTreeMap<String, (usize, usize, u64, u64, u64)> = BTreeMap::new();
+    // Per-action accumulators
+    let mut actions: BTreeMap<String, usize> = BTreeMap::new();
+
     for r in records {
         s.total_runs += 1;
         s.total_images += r.images;
@@ -261,7 +378,65 @@ pub fn summarize(records: &[RunRecord]) -> GainSummary {
         s.total_openai_after += r.token_savings.openai_after;
         s.total_anthropic_before += r.token_savings.anthropic_before;
         s.total_anthropic_after += r.token_savings.anthropic_after;
+        s.total_duration_ms += r.duration_ms;
+
+        // Per-provider
+        let entry = providers.entry(r.provider.clone()).or_default();
+        entry.0 += 1; // runs
+        entry.1 += r.images; // images
+                             // Use the matching provider's tokens (case-insensitive)
+        let provider_lower = r.provider.to_ascii_lowercase();
+        let (before, after) = if provider_lower == "anthropic" {
+            (
+                r.token_savings.anthropic_before,
+                r.token_savings.anthropic_after,
+            )
+        } else {
+            // Default to OpenAI tokens for "openai" and any unknown providers
+            (r.token_savings.openai_before, r.token_savings.openai_after)
+        };
+        entry.2 += before;
+        entry.3 += after;
+        entry.4 += r.duration_ms;
+
+        // Per-action
+        for (action, count) in &r.action_counts {
+            *actions.entry(action.clone()).or_default() += count;
+        }
     }
+
+    // Build per-provider vec sorted by tokens saved descending
+    let mut by_provider: Vec<ProviderGain> = providers
+        .into_iter()
+        .map(|(name, (runs, images, before, after, dur))| {
+            let saved = before.saturating_sub(after);
+            let overall_pct = if before > 0 {
+                (saved as f64 / before as f64) * 100.0
+            } else {
+                0.0
+            };
+            let avg_dur = if runs > 0 { dur / runs as u64 } else { 0 };
+            ProviderGain {
+                provider: name,
+                runs,
+                images,
+                tokens_saved: saved,
+                overall_pct,
+                avg_duration_ms: avg_dur,
+            }
+        })
+        .collect();
+    by_provider.sort_by_key(|b| std::cmp::Reverse(b.tokens_saved));
+    s.by_provider = by_provider;
+
+    // Build per-action vec sorted by count descending
+    let mut by_action: Vec<ActionGain> = actions
+        .into_iter()
+        .map(|(action, count)| ActionGain { action, count })
+        .collect();
+    by_action.sort_by_key(|b| std::cmp::Reverse(b.count));
+    s.by_action = by_action;
+
     s
 }
 
@@ -295,7 +470,11 @@ pub fn daily_breakdown(records: &[RunRecord]) -> Vec<DailyGain> {
 }
 
 /// Build a RunRecord from a completed Report.
-pub fn record_from_report(report: &crate::report::Report, provider: &str) -> RunRecord {
+pub fn record_from_report(
+    report: &crate::report::Report,
+    provider: &str,
+    duration_ms: u64,
+) -> RunRecord {
     // Get current timestamp
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -319,6 +498,13 @@ pub fn record_from_report(report: &crate::report::Report, provider: &str) -> Run
     );
     let date = format!("{:04}-{:02}-{:02}", year, month, day);
 
+    // Compute per-action counts from action records
+    let mut action_map = std::collections::BTreeMap::new();
+    for a in &report.actions {
+        *action_map.entry(a.action.clone()).or_insert(0usize) += 1;
+    }
+    let action_counts: Vec<(String, usize)> = action_map.into_iter().collect();
+
     RunRecord {
         timestamp,
         date,
@@ -330,6 +516,8 @@ pub fn record_from_report(report: &crate::report::Report, provider: &str) -> Run
         bytes_before: report.original_size,
         bytes_after: report.transformed_size,
         token_savings: report.token_savings.clone(),
+        duration_ms,
+        action_counts,
     }
 }
 
@@ -372,6 +560,8 @@ mod tests {
                 anthropic_before: 3000,
                 anthropic_after: 1000,
             },
+            duration_ms: 500,
+            action_counts: vec![("resize".to_string(), 2)],
         }
     }
 
@@ -495,10 +685,11 @@ mod tests {
             anthropic_after: 800,
         };
 
-        let record = record_from_report(&report, "openai");
+        let record = record_from_report(&report, "openai", 1234);
         assert_eq!(record.provider, "openai");
         assert_eq!(record.images, 3);
         assert_eq!(record.modified, 2);
+        assert_eq!(record.duration_ms, 1234);
         assert!(!record.timestamp.is_empty());
         assert!(!record.date.is_empty());
     }
@@ -604,5 +795,232 @@ mod tests {
         let result = load_records(Some(&path)).unwrap();
         assert_eq!(result.records.len(), 2);
         assert_eq!(result.skipped_lines, 3);
+    }
+
+    // ── Helpers for multi-provider tests ─────────────────────────────
+
+    fn make_anthropic_record(date: &str, anthropic_before: u64, anthropic_after: u64) -> RunRecord {
+        RunRecord {
+            timestamp: format!("{}T12:00:00Z", date),
+            date: date.to_string(),
+            provider: "anthropic".to_string(),
+            images: 2,
+            modified: 1,
+            dropped: 0,
+            svgs_rasterized: 0,
+            bytes_before: 3_000_000,
+            bytes_after: 800_000,
+            token_savings: TokenSavings {
+                openai_before: 500,
+                openai_after: 200,
+                anthropic_before,
+                anthropic_after,
+            },
+            duration_ms: 300,
+            action_counts: vec![("recompress".to_string(), 1)],
+        }
+    }
+
+    fn make_record_with_actions(date: &str, actions: Vec<(String, usize)>) -> RunRecord {
+        RunRecord {
+            action_counts: actions,
+            ..make_record(date, 1000, 300)
+        }
+    }
+
+    // ── Purge tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_purge_removes_old_records() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+
+        // Write a record with a very old date (should be purged)
+        let old = make_record("2020-01-01", 1000, 300);
+        record_run(&old, Some(&path)).unwrap();
+
+        // Write a record with today's date (should be kept)
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let (y, m, d) = days_to_ymd(now_secs / 86400);
+        let today = format!("{:04}-{:02}-{:02}", y, m, d);
+        let recent = make_record(&today, 2000, 500);
+        record_run(&recent, Some(&path)).unwrap();
+
+        let purged = purge_old_records(&path).unwrap();
+        assert_eq!(purged, 1);
+
+        let result = load_records(Some(&path)).unwrap();
+        assert_eq!(result.records.len(), 1);
+        assert_eq!(result.records[0].date, today);
+    }
+
+    #[test]
+    fn test_purge_no_op_when_nothing_to_purge() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let (y, m, d) = days_to_ymd(now_secs / 86400);
+        let today = format!("{:04}-{:02}-{:02}", y, m, d);
+
+        let r = make_record(&today, 1000, 300);
+        record_run(&r, Some(&path)).unwrap();
+
+        let purged = purge_old_records(&path).unwrap();
+        assert_eq!(purged, 0);
+
+        let result = load_records(Some(&path)).unwrap();
+        assert_eq!(result.records.len(), 1);
+    }
+
+    #[test]
+    fn test_purge_all_records_expired() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+
+        let old1 = make_record("2019-01-01", 1000, 300);
+        let old2 = make_record("2019-06-15", 2000, 500);
+        record_run(&old1, Some(&path)).unwrap();
+        record_run(&old2, Some(&path)).unwrap();
+
+        let purged = purge_old_records(&path).unwrap();
+        assert_eq!(purged, 2);
+
+        let result = load_records(Some(&path)).unwrap();
+        assert_eq!(result.records.len(), 0);
+    }
+
+    #[test]
+    fn test_purge_preserves_record_data() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let (y, m, d) = days_to_ymd(now_secs / 86400);
+        let today = format!("{:04}-{:02}-{:02}", y, m, d);
+
+        let r = RunRecord {
+            provider: "anthropic".to_string(),
+            images: 7,
+            modified: 5,
+            duration_ms: 1234,
+            action_counts: vec![("resize".to_string(), 3), ("convert".to_string(), 2)],
+            ..make_record(&today, 5000, 1500)
+        };
+        // Also write an old record to force purge to actually rewrite
+        let old = make_record("2020-01-01", 100, 50);
+        record_run(&old, Some(&path)).unwrap();
+        record_run(&r, Some(&path)).unwrap();
+
+        let purged = purge_old_records(&path).unwrap();
+        assert_eq!(purged, 1);
+
+        let result = load_records(Some(&path)).unwrap();
+        assert_eq!(result.records.len(), 1);
+        let kept = &result.records[0];
+        assert_eq!(kept.provider, "anthropic");
+        assert_eq!(kept.images, 7);
+        assert_eq!(kept.modified, 5);
+        assert_eq!(kept.duration_ms, 1234);
+        assert_eq!(kept.action_counts.len(), 2);
+    }
+
+    // ── Per-provider summarization tests ─────────────────────────────
+
+    #[test]
+    fn test_summarize_by_provider() {
+        let records = vec![
+            make_record("2026-04-20", 1000, 300),            // openai
+            make_record("2026-04-21", 2000, 500),            // openai
+            make_anthropic_record("2026-04-20", 4000, 1000), // anthropic
+        ];
+        let summary = summarize(&records);
+
+        assert_eq!(summary.by_provider.len(), 2);
+
+        // Sorted by tokens_saved descending
+        // anthropic: 4000-1000 = 3000
+        // openai:    (1000-300) + (2000-500) = 700 + 1500 = 2200
+        assert_eq!(summary.by_provider[0].provider, "anthropic");
+        assert_eq!(summary.by_provider[0].tokens_saved, 3000);
+        assert_eq!(summary.by_provider[0].runs, 1);
+        assert_eq!(summary.by_provider[0].images, 2);
+        assert!((summary.by_provider[0].overall_pct - 75.0).abs() < 0.1);
+
+        assert_eq!(summary.by_provider[1].provider, "openai");
+        assert_eq!(summary.by_provider[1].tokens_saved, 2200);
+        assert_eq!(summary.by_provider[1].runs, 2);
+        assert_eq!(summary.by_provider[1].images, 6);
+    }
+
+    #[test]
+    fn test_summarize_single_provider() {
+        let records = vec![make_record("2026-04-20", 1000, 300)];
+        let summary = summarize(&records);
+        assert_eq!(summary.by_provider.len(), 1);
+        assert_eq!(summary.by_provider[0].provider, "openai");
+        assert_eq!(summary.by_provider[0].tokens_saved, 700);
+    }
+
+    #[test]
+    fn test_summarize_provider_duration() {
+        let records = vec![
+            make_record("2026-04-20", 1000, 300), // duration_ms = 500
+            make_record("2026-04-21", 2000, 500), // duration_ms = 500
+        ];
+        let summary = summarize(&records);
+        assert_eq!(summary.by_provider[0].avg_duration_ms, 500); // 1000 total / 2 runs
+        assert_eq!(summary.total_duration_ms, 1000);
+    }
+
+    // ── Per-action summarization tests ───────────────────────────────
+
+    #[test]
+    fn test_summarize_by_action() {
+        let records = vec![
+            make_record_with_actions(
+                "2026-04-20",
+                vec![("resize".to_string(), 3), ("convert".to_string(), 1)],
+            ),
+            make_record_with_actions(
+                "2026-04-21",
+                vec![("resize".to_string(), 2), ("recompress".to_string(), 4)],
+            ),
+        ];
+        let summary = summarize(&records);
+
+        assert_eq!(summary.by_action.len(), 3);
+        // Sorted by count descending: resize=5, recompress=4, convert=1
+        assert_eq!(summary.by_action[0].action, "resize");
+        assert_eq!(summary.by_action[0].count, 5);
+        assert_eq!(summary.by_action[1].action, "recompress");
+        assert_eq!(summary.by_action[1].count, 4);
+        assert_eq!(summary.by_action[2].action, "convert");
+        assert_eq!(summary.by_action[2].count, 1);
+    }
+
+    #[test]
+    fn test_summarize_empty_actions() {
+        let mut r = make_record("2026-04-20", 1000, 300);
+        r.action_counts = vec![];
+        let summary = summarize(&[r]);
+        assert!(summary.by_action.is_empty());
+    }
+
+    #[test]
+    fn test_summarize_empty_records() {
+        let summary = summarize(&[]);
+        assert_eq!(summary.total_runs, 0);
+        assert!(summary.by_provider.is_empty());
+        assert!(summary.by_action.is_empty());
     }
 }

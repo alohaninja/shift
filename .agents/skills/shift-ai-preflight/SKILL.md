@@ -1,3 +1,8 @@
+---
+name: shift-ai-preflight
+description: Inspect and optimize base64-encoded images in AI API request payloads before sending to OpenAI or Anthropic. Prevents oversized-image failures, preserves JPEG format on resize, and reduces multimodal token usage. Use when building or debugging multimodal API requests with inline base64 images, troubleshooting 400 errors from oversized images, or reducing vision token costs.
+---
+
 # shift-ai Preflight
 
 Inspect and optimize base64-encoded images in AI API request payloads before sending. Helps prevent oversized-image failures and can reduce multimodal token usage.
@@ -16,11 +21,24 @@ Do not use this skill when:
 - The payload has already been optimized by `shift-ai`
 - You need exact preservation of original image bytes
 
+## Prerequisites
+
+Install shift-ai:
+
+```bash
+# Homebrew
+brew tap alohaninja/shift && brew install shift-ai
+
+# Or cargo
+cargo install shift-preflight-cli
+```
+
 ## Important behavior
 
 - `shift-ai preflight` inspects the payload and reports what would change. It does **not** modify the input payload.
 - `shift-ai` (without `preflight`) transforms the payload and writes optimized JSON to stdout.
 - v1 supports **inline base64-encoded images only**. URL-referenced images may be detected but are not transformed.
+- JPEG images stay JPEG after resize (quality 85). PNG, GIF, and WebP are encoded as PNG for lossless safety.
 - Non-zero exit code on malformed JSON, unsupported provider, or unreadable input.
 - Token estimates are approximations based on published provider formulas. Actual billing may differ by model.
 

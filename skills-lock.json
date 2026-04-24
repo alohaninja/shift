@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "shift-ai-preflight": {
+      "source": "alohaninja/shift",
+      "sourceType": "github",
+      "computedHash": "bd5ec6b88b2a32af406ad5dce71c808dbd5a6a9eb8656ae5750553407ecd95a9"
+    }
+  }
+}
