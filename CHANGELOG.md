@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/alohaninja/shift/compare/v0.4.1...v0.5.0) (2026-04-24)
+
+
+### Features
+
+* add @shift-ai/runtime — AI SDK middleware + HTTP proxy ([#16](https://github.com/alohaninja/shift/issues/16)) ([6f7c8ed](https://github.com/alohaninja/shift/commit/6f7c8ede894138ccabaf2c97b95aa432f0afc870))
+
 ## [0.4.1](https://github.com/alohaninja/shift/compare/v0.4.0...v0.4.1) (2026-04-24)
 
 
