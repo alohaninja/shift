@@ -129,6 +129,16 @@ git clone https://github.com/alohaninja/shift.git && cd shift
 cargo install --path shift-cli
 ```
 
+### AI Agent Skill
+
+If you use an AI coding agent (Claude Code, Cursor, Copilot, Windsurf, etc.):
+
+```bash
+npx skills add alohaninja/shift
+```
+
+This installs the `shift-ai-preflight` skill, which teaches your agent when and how to use SHIFT to optimize image payloads.
+
 ### Verify installation
 
 ```bash
