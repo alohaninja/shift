@@ -1,5 +1,8 @@
 # @shift-preflight/runtime
 
+[![npm](https://img.shields.io/npm/v/@shift-preflight/runtime)](https://www.npmjs.com/package/@shift-preflight/runtime)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 Multimodal preflight for any AI agent — transparent image optimization before images reach the LLM.
 
 Two integration modes:
@@ -74,6 +77,9 @@ export ANTHROPIC_BASE_URL=http://localhost:8787
 
 # Codex CLI
 export OPENAI_BASE_URL=http://localhost:8787
+
+# Gemini CLI
+export GEMINI_API_BASE=http://localhost:8787
 
 # Python
 client = Anthropic(base_url="http://localhost:8787")

@@ -210,6 +210,12 @@
         <a href="#custom-profiles">Custom Profiles</a>
       </div>
       <div class="sidebar-section">
+        <div class="sidebar-title">Runtime</div>
+        <a href="#runtime">Overview</a>
+        <a href="#ai-sdk-middleware">AI SDK Middleware</a>
+        <a href="#http-proxy">HTTP Proxy</a>
+      </div>
+      <div class="sidebar-section">
         <div class="sidebar-title">Developer</div>
         <a href="#library-usage">Library Usage</a>
         <a href="#project-structure">Project Structure</a>
@@ -535,6 +541,11 @@ eprintln!("{}", report); <span class="comment">// what changed and why</span></c
 │       ├── report.rs    Transformation report with token savings
 │       └── mode.rs      DriveMode, SvgMode, ShiftConfig
 ├── shift-cli/           Binary crate → shift-ai
+├── runtime/             TypeScript: @shift-preflight/runtime
+│   ├── src/core/        Optimizer, binary detection, data conversion
+│   ├── src/middleware/   AI SDK middleware (transformParams)
+│   ├── src/proxy/       HTTP proxy (Hono server + routes)
+│   └── test/            Unit + integration tests
 ├── profiles/            Provider constraint JSON (embedded at compile)
 ├── tests/               Test images and sample payloads
 └── .github/workflows/   CI + release pipelines</code>
@@ -551,6 +562,105 @@ eprintln!("{}", report); <span class="comment">// what changed and why</span></c
       </div>
 
       <p>This installs the <code>shift-ai-preflight</code> skill, which teaches your agent when and how to use SHIFT to optimize image payloads. The skill activates automatically when building or debugging multimodal API requests with inline base64 images.</p>
+
+      <!-- Runtime -->
+      <h2 id="runtime">Runtime: Middleware &amp; Proxy</h2>
+
+      <p>The <code>@shift-preflight/runtime</code> package provides two ways to integrate SHIFT into any AI agent or application without manually calling the CLI. Both use <code>shift-ai</code> under the hood and gracefully no-op if it's not installed.</p>
+
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>npm install @shift-preflight/runtime</code>
+      </div>
+
+      <h3 id="ai-sdk-middleware">AI SDK Middleware</h3>
+
+      <p>For any <a href="https://sdk.vercel.ai" target="_blank" rel="noopener">Vercel AI SDK</a> app (OpenCode, Next.js, custom agents), the middleware intercepts <code>transformParams</code> and optimizes all images in all messages before they reach the provider.</p>
+
+      <div class="code-block-full">
+        <span class="code-lang">typescript</span>
+        <code>import { shiftMiddleware } from "@shift-preflight/runtime";
+import { wrapLanguageModel, generateText } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+
+const model = wrapLanguageModel({
+  model: anthropic("claude-sonnet-4-20250514"),
+  middleware: shiftMiddleware({ mode: "balanced" }),
+});
+
+// All images in all messages are now optimized automatically
+const result = await generateText({ model, messages: [...] });</code>
+      </div>
+
+      <p>Configuration options:</p>
+      <table>
+        <tr><th>Option</th><th>Default</th><th>Description</th></tr>
+        <tr><td><code>mode</code></td><td><code>"balanced"</code></td><td>Drive mode: <code>performance</code>, <code>balanced</code>, or <code>economy</code></td></tr>
+        <tr><td><code>minSize</code></td><td><code>100_000</code></td><td>Skip images smaller than this (bytes)</td></tr>
+        <tr><td><code>disabled</code></td><td><code>false</code></td><td>Kill switch &mdash; pass through unchanged</td></tr>
+        <tr><td><code>provider</code></td><td>auto</td><td>Override auto-detected provider</td></tr>
+        <tr><td><code>binary</code></td><td>auto</td><td>Path to <code>shift-ai</code> binary</td></tr>
+        <tr><td><code>onOptimize</code></td><td>&mdash;</td><td>Callback with per-image metrics</td></tr>
+      </table>
+
+      <p>Already-optimized images are tagged with a skip marker and won't be re-processed on subsequent conversation turns.</p>
+
+      <h3 id="http-proxy">HTTP Proxy</h3>
+
+      <p>For any agent in any language, the proxy sits between your agent and the AI provider. It intercepts requests, optimizes images via SHIFT, and forwards to the real API. Auth headers and SSE streams pass through unchanged.</p>
+
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code>npx @shift-preflight/runtime proxy --port 8787 --mode balanced --verbose</code>
+      </div>
+
+      <p>Then set the base URL for your agent:</p>
+
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code><span class="comment"># Claude Code</span>
+export ANTHROPIC_BASE_URL=http://localhost:8787
+
+<span class="comment"># Codex CLI</span>
+export OPENAI_BASE_URL=http://localhost:8787
+
+<span class="comment"># Gemini CLI</span>
+export GEMINI_API_BASE=http://localhost:8787
+
+<span class="comment"># Python</span>
+client = Anthropic(base_url="http://localhost:8787")
+client = OpenAI(base_url="http://localhost:8787/v1")</code>
+      </div>
+
+      <p>Proxy routes:</p>
+      <table>
+        <tr><th>Route</th><th>Provider</th></tr>
+        <tr><td><code>POST /v1/messages</code></td><td>Anthropic</td></tr>
+        <tr><td><code>POST /v1/chat/completions</code></td><td>OpenAI</td></tr>
+        <tr><td><code>POST /v1beta/models/*</code></td><td>Google (passthrough, native support pending)</td></tr>
+      </table>
+
+      <p>The proxy can also be started programmatically:</p>
+
+      <div class="code-block-full">
+        <span class="code-lang">typescript</span>
+        <code>import { startProxy } from "@shift-preflight/runtime/proxy";
+
+const server = await startProxy({
+  port: 8787,
+  mode: "balanced",
+  verbose: true,
+});</code>
+      </div>
+
+      <p>Provider support:</p>
+      <table>
+        <tr><th>Provider</th><th>Middleware</th><th>Proxy</th><th>Constraints</th></tr>
+        <tr><td>Anthropic</td><td>Yes</td><td>Yes</td><td>5MB max, 1.15 MP, 8000px</td></tr>
+        <tr><td>OpenAI</td><td>Yes</td><td>Yes</td><td>20MB max, 2048px, tile tokens</td></tr>
+        <tr><td>Google</td><td>Yes</td><td>Passthrough*</td><td>20MB max, 3072px</td></tr>
+      </table>
+      <p style="font-size: 0.85rem; color: var(--text-muted);">* Google proxy optimization pending native SHIFT support for Gemini payload format.</p>
 
       <!-- Troubleshooting -->
       <h2 id="troubleshooting">Troubleshooting</h2>
