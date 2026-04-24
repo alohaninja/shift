@@ -204,12 +204,14 @@ fn run() -> Result<()> {
         );
     }
 
-    // Process
+    // Process (with timing)
+    let start = std::time::Instant::now();
     let (result, report) = shift_preflight::process(&payload, &config)?;
+    let duration_ms = start.elapsed().as_millis() as u64;
 
     // Record stats (unless disabled or dry-run)
     if !cli.no_stats && !cli.dry_run && report.images_found > 0 {
-        let record = shift_preflight::stats::record_from_report(&report, &provider);
+        let record = shift_preflight::stats::record_from_report(&report, &provider, duration_ms);
         if let Err(e) = shift_preflight::stats::record_run(&record, None) {
             eprintln!("shift-ai: warning: failed to save stats: {}", e);
         }
@@ -386,8 +388,11 @@ fn run_preflight(
 }
 
 fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
+    use colored::Colorize;
+
     let load_result = shift_preflight::stats::load_records(None)?;
     let records = load_result.records;
+    let use_color = std::io::stdout().is_terminal();
 
     if records.is_empty() {
         println!("No SHIFT runs recorded yet. Stats are saved automatically after each run.");
@@ -398,7 +403,6 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
     if daily {
         let days = shift_preflight::stats::daily_breakdown(&records);
         if format == Some("json") {
-            // Serialize daily data as JSON
             let json_days: Vec<serde_json::Value> = days
                 .iter()
                 .map(|d| {
@@ -413,21 +417,36 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
                 .collect();
             println!("{}", serde_json::to_string_pretty(&json_days)?);
         } else {
-            println!("=== SHIFT Daily Token Savings ===\n");
+            if use_color {
+                println!("{}", "SHIFT Daily Token Savings".bold().green());
+                println!("{}", "═".repeat(58).green());
+            } else {
+                println!("=== SHIFT Daily Token Savings ===");
+            }
+            println!();
             println!(
                 "{:<12} {:>5} {:>7} {:>15} {:>15}",
                 "Date", "Runs", "Images", "OpenAI saved", "Anthropic saved"
             );
-            println!("{}", "-".repeat(58));
+            println!("{}", "─".repeat(58));
             for d in &days {
-                println!(
-                    "{:<12} {:>5} {:>7} {:>15} {:>15}",
-                    d.date,
-                    d.runs,
-                    d.images,
-                    fmt_tokens(d.openai_saved),
-                    fmt_tokens(d.anthropic_saved),
-                );
+                let oai = fmt_tokens(d.openai_saved);
+                let ant = fmt_tokens(d.anthropic_saved);
+                if use_color {
+                    println!(
+                        "{:<12} {:>5} {:>7} {:>15} {:>15}",
+                        d.date,
+                        d.runs,
+                        d.images,
+                        oai.green(),
+                        ant.green(),
+                    );
+                } else {
+                    println!(
+                        "{:<12} {:>5} {:>7} {:>15} {:>15}",
+                        d.date, d.runs, d.images, oai, ant,
+                    );
+                }
             }
         }
     } else {
@@ -438,6 +457,7 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
                 "total_images": summary.total_images,
                 "total_modified": summary.total_modified,
                 "bytes_saved": summary.bytes_saved(),
+                "total_duration_ms": summary.total_duration_ms,
                 "openai_tokens_before": summary.total_openai_before,
                 "openai_tokens_after": summary.total_openai_after,
                 "openai_tokens_saved": summary.openai_saved(),
@@ -446,44 +466,261 @@ fn run_gain(daily: bool, format: Option<&str>) -> Result<()> {
                 "anthropic_tokens_after": summary.total_anthropic_after,
                 "anthropic_tokens_saved": summary.anthropic_saved(),
                 "anthropic_pct": summary.anthropic_pct(),
+                "by_provider": summary.by_provider.iter().map(|p| {
+                    serde_json::json!({
+                        "provider": p.provider,
+                        "runs": p.runs,
+                        "images": p.images,
+                        "tokens_saved": p.tokens_saved,
+                        "avg_pct": p.avg_pct,
+                        "avg_duration_ms": p.avg_duration_ms,
+                    })
+                }).collect::<Vec<_>>(),
+                "by_action": summary.by_action.iter().map(|a| {
+                    serde_json::json!({
+                        "action": a.action,
+                        "count": a.count,
+                    })
+                }).collect::<Vec<_>>(),
             });
             println!("{}", serde_json::to_string_pretty(&json)?);
         } else {
-            println!("=== SHIFT Cumulative Savings ===\n");
-            println!("Runs:     {}", summary.total_runs);
-            println!(
-                "Images:   {} processed, {} modified",
-                summary.total_images, summary.total_modified
-            );
-            println!("Bytes:    {} saved", fmt_bytes(summary.bytes_saved()));
-            if load_result.skipped_lines > 0 {
-                println!(
-                    "Warning:  {} corrupted stats line(s) skipped",
-                    load_result.skipped_lines
-                );
+            // ── Header ──────────────────────────────────────────────
+            if use_color {
+                println!("{}", "SHIFT Token Savings".bold().green());
+                println!("{}", "═".repeat(50).green());
+            } else {
+                println!("=== SHIFT Token Savings ===");
             }
             println!();
-            println!("Token Savings (estimated):");
-            if summary.total_openai_before > 0 {
+
+            // ── Summary stats ───────────────────────────────────────
+            println!("{:<18}{}", "Total runs:", summary.total_runs);
+            println!(
+                "{:<18}{} ({} modified)",
+                "Images processed:", summary.total_images, summary.total_modified
+            );
+            println!("{:<18}{}", "Bytes saved:", fmt_bytes(summary.bytes_saved()));
+            if summary.total_duration_ms > 0 {
+                let avg_ms = if summary.total_runs > 0 {
+                    summary.total_duration_ms / summary.total_runs as u64
+                } else {
+                    0
+                };
                 println!(
-                    "  OpenAI:    {} -> {} tokens  ({:.1}% saved)",
-                    fmt_tokens(summary.total_openai_before),
-                    fmt_tokens(summary.total_openai_after),
-                    summary.openai_pct()
+                    "{:<18}{} (avg {})",
+                    "Total exec time:",
+                    fmt_duration(summary.total_duration_ms),
+                    fmt_duration(avg_ms)
                 );
             }
-            if summary.total_anthropic_before > 0 {
-                println!(
-                    "  Anthropic: {} -> {} tokens  ({:.1}% saved)",
-                    fmt_tokens(summary.total_anthropic_before),
-                    fmt_tokens(summary.total_anthropic_after),
-                    summary.anthropic_pct()
+            if load_result.skipped_lines > 0 {
+                let msg = format!(
+                    "{} corrupted stats line(s) skipped",
+                    load_result.skipped_lines
                 );
+                if use_color {
+                    println!("{:<18}{}", "Warning:", msg.yellow());
+                } else {
+                    println!("{:<18}{}", "Warning:", msg);
+                }
+            }
+            println!();
+
+            // ── Token savings ────────────────────────────────────────
+            if summary.total_openai_before > 0 {
+                let pct_str = format!("{:.1}%", summary.openai_pct());
+                if use_color {
+                    println!(
+                        "{:<18}{} -> {} tokens  ({})",
+                        "OpenAI tokens:",
+                        fmt_tokens(summary.total_openai_before),
+                        fmt_tokens(summary.total_openai_after),
+                        colorize_pct(&pct_str, summary.openai_pct()),
+                    );
+                } else {
+                    println!(
+                        "{:<18}{} -> {} tokens  ({} saved)",
+                        "OpenAI tokens:",
+                        fmt_tokens(summary.total_openai_before),
+                        fmt_tokens(summary.total_openai_after),
+                        pct_str,
+                    );
+                }
+            }
+            if summary.total_anthropic_before > 0 {
+                let pct_str = format!("{:.1}%", summary.anthropic_pct());
+                if use_color {
+                    println!(
+                        "{:<18}{} -> {} tokens  ({})",
+                        "Anthropic tokens:",
+                        fmt_tokens(summary.total_anthropic_before),
+                        fmt_tokens(summary.total_anthropic_after),
+                        colorize_pct(&pct_str, summary.anthropic_pct()),
+                    );
+                } else {
+                    println!(
+                        "{:<18}{} -> {} tokens  ({} saved)",
+                        "Anthropic tokens:",
+                        fmt_tokens(summary.total_anthropic_before),
+                        fmt_tokens(summary.total_anthropic_after),
+                        pct_str,
+                    );
+                }
+            }
+
+            // ── Efficiency meter ─────────────────────────────────────
+            // Use the best savings percentage across providers
+            let best_pct = if summary.anthropic_pct() > summary.openai_pct() {
+                summary.anthropic_pct()
+            } else {
+                summary.openai_pct()
+            };
+            println!();
+            print_efficiency_meter(best_pct, use_color);
+
+            // ── By Provider ──────────────────────────────────────────
+            if summary.by_provider.len() > 1 {
+                println!();
+                if use_color {
+                    println!("{}", "By Provider".bold().green());
+                } else {
+                    println!("By Provider");
+                }
+                println!();
+                println!(
+                    " {:<3}{:<14}{:>6}{:>9}{:>14}{:>8}{:>8}  {}",
+                    "#", "Provider", "Runs", "Images", "Tokens Saved", "Avg%", "Time", "Impact"
+                );
+                println!(" {}", "─".repeat(70));
+                let max_saved = summary
+                    .by_provider
+                    .iter()
+                    .map(|p| p.tokens_saved)
+                    .max()
+                    .unwrap_or(1);
+                for (i, p) in summary.by_provider.iter().enumerate() {
+                    let pct_str = format!("{:.1}%", p.avg_pct);
+                    let bar = mini_bar(p.tokens_saved, max_saved, 10, use_color);
+                    if use_color {
+                        println!(
+                            " {:<3}{:<14}{:>6}{:>9}{:>14}{:>8}{:>8}  {}",
+                            format!("{}.", i + 1),
+                            p.provider,
+                            p.runs,
+                            p.images,
+                            fmt_tokens(p.tokens_saved),
+                            colorize_pct(&pct_str, p.avg_pct),
+                            fmt_duration(p.avg_duration_ms),
+                            bar,
+                        );
+                    } else {
+                        println!(
+                            " {:<3}{:<14}{:>6}{:>9}{:>14}{:>8}{:>8}  {}",
+                            format!("{}.", i + 1),
+                            p.provider,
+                            p.runs,
+                            p.images,
+                            fmt_tokens(p.tokens_saved),
+                            pct_str,
+                            fmt_duration(p.avg_duration_ms),
+                            bar,
+                        );
+                    }
+                }
+            }
+
+            // ── By Action ────────────────────────────────────────────
+            if !summary.by_action.is_empty() {
+                println!();
+                if use_color {
+                    println!("{}", "By Action".bold().green());
+                } else {
+                    println!("By Action");
+                }
+                println!();
+                println!(" {:<3}{:<20}{:>8}", "#", "Action", "Count");
+                println!(" {}", "─".repeat(32));
+                for (i, a) in summary.by_action.iter().enumerate() {
+                    println!(
+                        " {:<3}{:<20}{:>8}",
+                        format!("{}.", i + 1),
+                        a.action,
+                        a.count,
+                    );
+                }
             }
         }
     }
 
     Ok(())
+}
+
+/// Print an RTK-style efficiency meter bar.
+fn print_efficiency_meter(pct: f64, use_color: bool) {
+    use colored::Colorize;
+    let width = 24usize;
+    let filled = ((pct / 100.0) * width as f64).round() as usize;
+    let filled = filled.min(width);
+    let meter = format!("{}{}", "█".repeat(filled), "░".repeat(width - filled));
+    let pct_str = format!("{:.1}%", pct);
+    if use_color {
+        println!(
+            "{:<18}{} {}",
+            "Efficiency meter:",
+            meter.green(),
+            colorize_pct(&pct_str, pct),
+        );
+    } else {
+        println!("{:<18}{} {}", "Efficiency meter:", meter, pct_str,);
+    }
+}
+
+/// Color a percentage string by tier: green >= 50%, yellow >= 20%, red < 20%.
+fn colorize_pct(s: &str, pct: f64) -> String {
+    use colored::Colorize;
+    if !std::io::stdout().is_terminal() {
+        return s.to_string();
+    }
+    if pct >= 50.0 {
+        s.green().bold().to_string()
+    } else if pct >= 20.0 {
+        s.yellow().bold().to_string()
+    } else {
+        s.red().bold().to_string()
+    }
+}
+
+/// Build a mini impact bar (RTK-style).
+fn mini_bar(value: u64, max: u64, width: usize, use_color: bool) -> String {
+    use colored::Colorize;
+    if max == 0 {
+        return "░".repeat(width);
+    }
+    let filled = ((value as f64 / max as f64) * width as f64).round() as usize;
+    let filled = filled.min(width);
+    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(width - filled));
+    if use_color {
+        bar.cyan().to_string()
+    } else {
+        bar
+    }
+}
+
+/// Format milliseconds as human-readable duration.
+fn fmt_duration(ms: u64) -> String {
+    if ms == 0 {
+        return "0ms".to_string();
+    }
+    if ms < 1_000 {
+        format!("{}ms", ms)
+    } else if ms < 60_000 {
+        format!("{:.1}s", ms as f64 / 1_000.0)
+    } else {
+        let mins = ms / 60_000;
+        let secs = (ms % 60_000) / 1_000;
+        format!("{}m{:02}s", mins, secs)
+    }
 }
 
 fn fmt_bytes(n: u64) -> String {

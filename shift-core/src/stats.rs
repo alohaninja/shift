@@ -43,6 +43,12 @@ pub struct RunRecord {
     pub bytes_after: usize,
     /// Token savings
     pub token_savings: TokenSavings,
+    /// Pipeline execution time in milliseconds
+    #[serde(default)]
+    pub duration_ms: u64,
+    /// Per-action counts: (action_name, count)
+    #[serde(default)]
+    pub action_counts: Vec<(String, usize)>,
 }
 
 /// Aggregated gain summary.
@@ -57,6 +63,29 @@ pub struct GainSummary {
     pub total_openai_after: u64,
     pub total_anthropic_before: u64,
     pub total_anthropic_after: u64,
+    pub total_duration_ms: u64,
+    /// Per-provider: (provider, runs, images, tokens_saved, avg_pct, avg_duration_ms)
+    pub by_provider: Vec<ProviderGain>,
+    /// Per-action: (action, count, bytes_saved)
+    pub by_action: Vec<ActionGain>,
+}
+
+/// Per-provider aggregated stats.
+#[derive(Debug, Clone)]
+pub struct ProviderGain {
+    pub provider: String,
+    pub runs: usize,
+    pub images: usize,
+    pub tokens_saved: u64,
+    pub avg_pct: f64,
+    pub avg_duration_ms: u64,
+}
+
+/// Per-action aggregated stats.
+#[derive(Debug, Clone)]
+pub struct ActionGain {
+    pub action: String,
+    pub count: usize,
 }
 
 /// Daily aggregation bucket.
@@ -250,7 +279,15 @@ pub fn load_records(path: Option<&PathBuf>) -> Result<LoadResult> {
 
 /// Compute aggregate gain summary from records.
 pub fn summarize(records: &[RunRecord]) -> GainSummary {
+    use std::collections::BTreeMap;
+
     let mut s = GainSummary::default();
+
+    // Per-provider accumulators: (runs, images, tokens_before, tokens_after, total_duration_ms)
+    let mut providers: BTreeMap<String, (usize, usize, u64, u64, u64)> = BTreeMap::new();
+    // Per-action accumulators
+    let mut actions: BTreeMap<String, usize> = BTreeMap::new();
+
     for r in records {
         s.total_runs += 1;
         s.total_images += r.images;
@@ -261,7 +298,62 @@ pub fn summarize(records: &[RunRecord]) -> GainSummary {
         s.total_openai_after += r.token_savings.openai_after;
         s.total_anthropic_before += r.token_savings.anthropic_before;
         s.total_anthropic_after += r.token_savings.anthropic_after;
+        s.total_duration_ms += r.duration_ms;
+
+        // Per-provider
+        let entry = providers.entry(r.provider.clone()).or_default();
+        entry.0 += 1; // runs
+        entry.1 += r.images; // images
+                             // Use the matching provider's tokens
+        let (before, after) = match r.provider.as_str() {
+            "anthropic" => (
+                r.token_savings.anthropic_before,
+                r.token_savings.anthropic_after,
+            ),
+            _ => (r.token_savings.openai_before, r.token_savings.openai_after),
+        };
+        entry.2 += before;
+        entry.3 += after;
+        entry.4 += r.duration_ms;
+
+        // Per-action
+        for (action, count) in &r.action_counts {
+            *actions.entry(action.clone()).or_default() += count;
+        }
     }
+
+    // Build per-provider vec sorted by tokens saved descending
+    let mut by_provider: Vec<ProviderGain> = providers
+        .into_iter()
+        .map(|(name, (runs, images, before, after, dur))| {
+            let saved = before.saturating_sub(after);
+            let avg_pct = if before > 0 {
+                (saved as f64 / before as f64) * 100.0
+            } else {
+                0.0
+            };
+            let avg_dur = if runs > 0 { dur / runs as u64 } else { 0 };
+            ProviderGain {
+                provider: name,
+                runs,
+                images,
+                tokens_saved: saved,
+                avg_pct,
+                avg_duration_ms: avg_dur,
+            }
+        })
+        .collect();
+    by_provider.sort_by(|a, b| b.tokens_saved.cmp(&a.tokens_saved));
+    s.by_provider = by_provider;
+
+    // Build per-action vec sorted by count descending
+    let mut by_action: Vec<ActionGain> = actions
+        .into_iter()
+        .map(|(action, count)| ActionGain { action, count })
+        .collect();
+    by_action.sort_by(|a, b| b.count.cmp(&a.count));
+    s.by_action = by_action;
+
     s
 }
 
@@ -295,7 +387,11 @@ pub fn daily_breakdown(records: &[RunRecord]) -> Vec<DailyGain> {
 }
 
 /// Build a RunRecord from a completed Report.
-pub fn record_from_report(report: &crate::report::Report, provider: &str) -> RunRecord {
+pub fn record_from_report(
+    report: &crate::report::Report,
+    provider: &str,
+    duration_ms: u64,
+) -> RunRecord {
     // Get current timestamp
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -319,6 +415,13 @@ pub fn record_from_report(report: &crate::report::Report, provider: &str) -> Run
     );
     let date = format!("{:04}-{:02}-{:02}", year, month, day);
 
+    // Compute per-action counts from action records
+    let mut action_map = std::collections::BTreeMap::new();
+    for a in &report.actions {
+        *action_map.entry(a.action.clone()).or_insert(0usize) += 1;
+    }
+    let action_counts: Vec<(String, usize)> = action_map.into_iter().collect();
+
     RunRecord {
         timestamp,
         date,
@@ -330,6 +433,8 @@ pub fn record_from_report(report: &crate::report::Report, provider: &str) -> Run
         bytes_before: report.original_size,
         bytes_after: report.transformed_size,
         token_savings: report.token_savings.clone(),
+        duration_ms,
+        action_counts,
     }
 }
 
@@ -372,6 +477,8 @@ mod tests {
                 anthropic_before: 3000,
                 anthropic_after: 1000,
             },
+            duration_ms: 500,
+            action_counts: vec![("resize".to_string(), 2)],
         }
     }
 
@@ -495,10 +602,11 @@ mod tests {
             anthropic_after: 800,
         };
 
-        let record = record_from_report(&report, "openai");
+        let record = record_from_report(&report, "openai", 1234);
         assert_eq!(record.provider, "openai");
         assert_eq!(record.images, 3);
         assert_eq!(record.modified, 2);
+        assert_eq!(record.duration_ms, 1234);
         assert!(!record.timestamp.is_empty());
         assert!(!record.date.is_empty());
     }
