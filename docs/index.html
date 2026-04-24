@@ -268,7 +268,7 @@
       .hero-stats { gap: 20px; }
       .stat-value { font-size: 1.5rem; }
       .hero-icon { width: 80px; height: 80px; border-radius: 16px; }
-      .problem-grid, .demo-grid, .install-grid, .modes-grid { grid-template-columns: 1fr; }
+      .problem-grid, .demo-grid, .install-grid, .modes-grid { grid-template-columns: 1fr !important; }
       section { padding: 60px 0; }
       .footer-inner { flex-direction: column; gap: 12px; text-align: center; }
       .terminal-body { font-size: 0.68rem; padding: 14px; min-height: 160px; }
@@ -445,7 +445,7 @@
         <img src="flow.svg" alt="SHIFT pipeline: Inspect, Policy, Transform, Reconstruct" loading="lazy">
       </div>
 
-      <div class="problem-grid">
+      <div class="problem-grid" style="grid-template-columns: repeat(4, 1fr);">
         <div class="problem-card">
           <h3 style="color: var(--cyan);">1. Inspect</h3>
           <p>Detect every image in the payload. Extract format via magic bytes, read dimensions, measure file size. Handles base64 data URIs, raw base64, and URL references.</p>
@@ -455,8 +455,12 @@
           <p>Load the provider profile. Compare each image against constraints. Apply drive mode rules to determine actions: resize, recompress, convert, rasterize, or drop.</p>
         </div>
         <div class="problem-card">
-          <h3 style="color: var(--pink);">3. Transform &amp; Reconstruct</h3>
-          <p>Execute actions with Lanczos3 filtering. Rasterize SVGs via resvg. Convert BMP/TIFF to PNG. Rebuild the payload with optimized images slotted back in.</p>
+          <h3 style="color: var(--pink);">3. Transform</h3>
+          <p>Execute actions with Lanczos3 filtering. Rasterize SVGs via resvg. Convert BMP/TIFF to PNG. Recompress bloated images to meet size limits.</p>
+        </div>
+        <div class="problem-card">
+          <h3 style="color: var(--accent);">4. Reconstruct</h3>
+          <p>Rebuild the payload with optimized images slotted back into their original positions. Output a valid, provider-safe JSON request ready to send.</p>
         </div>
       </div>
     </div>
@@ -499,14 +503,14 @@
               <td>1254x1254</td>
               <td>1024x1024</td>
               <td>765 &rarr; 765</td>
-              <td>1,568 &rarr; 1,405 <span class="savings-badge">-10%</span></td>
+              <td>1,568 &rarr; 1,430 <span class="savings-badge">-9%</span></td>
             </tr>
             <tr>
               <td>SVG diagram &rarr; rasterized PNG</td>
               <td>SVG</td>
               <td>512x256 PNG</td>
               <td>255 &rarr; 255</td>
-              <td>0 &rarr; 98 <span style="display:inline-block;padding:2px 8px;border-radius:100px;font-weight:700;font-size:0.72rem;font-family:var(--font-mono);background:var(--cyan-dim);color:var(--cyan);">enabled</span></td>
+              <td>0 &rarr; 198 <span style="display:inline-block;padding:2px 8px;border-radius:100px;font-weight:700;font-size:0.72rem;font-family:var(--font-mono);background:var(--cyan-dim);color:var(--cyan);">enabled</span></td>
             </tr>
           </tbody>
         </table>

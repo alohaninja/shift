@@ -139,9 +139,26 @@
     .footer-links a { color: var(--text-muted); transition: color 0.2s; }
     .footer-links a:hover { color: var(--text); text-decoration: none; }
 
+    /* Mobile TOC toggle */
+    .mobile-toc-btn {
+      display: none; position: fixed; bottom: 20px; right: 20px; z-index: 150;
+      width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--border);
+      background: var(--bg-card); color: var(--accent); font-size: 1.2rem;
+      cursor: pointer; box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      align-items: center; justify-content: center; transition: all 0.2s;
+    }
+    .mobile-toc-btn:hover { background: var(--accent); color: var(--bg); }
+
     /* Responsive */
     @media (max-width: 768px) {
-      .sidebar { display: none; }
+      .sidebar {
+        display: none; position: fixed; top: 60px; left: 0; right: 0; bottom: 0;
+        width: 100%; height: auto; z-index: 140; background: var(--bg);
+        border-right: none; border-bottom: 1px solid var(--border);
+        padding: 20px 24px; overflow-y: auto;
+      }
+      .sidebar.mobile-open { display: block; }
+      .mobile-toc-btn { display: flex; }
       .content { padding: 32px 20px 60px; }
       .page { padding-top: 60px; }
       .nav-links a:not(.btn-sm) { display: none; }
@@ -308,7 +325,14 @@ Options:
 Commands:
   shift-ai gain                 Show cumulative token savings
   shift-ai gain --daily         Day-by-day breakdown
-  shift-ai gain --format json   Machine-readable output for dashboards</code>
+  shift-ai gain --format json   Machine-readable output for dashboards
+
+  shift-ai preflight [FILE]     Validate payload and preview optimizations
+    -p, --provider &lt;PROVIDER&gt;     Target provider [default: openai]
+    -m, --mode &lt;MODE&gt;             Drive mode [default: balanced]
+        --model &lt;MODEL&gt;           Target model override
+        --profile &lt;FILE&gt;          Custom provider profile JSON
+    -v, --verbose                 Verbose output</code>
       </div>
 
       <!-- Drive Modes -->
@@ -355,7 +379,7 @@ Commands:
             </tr>
             <tr>
               <td><strong>source</strong></td>
-              <td>Replace the image with SVG XML as a text content block.</td>
+              <td>Drop the SVG image from the payload (provider-incompatible). A warning is emitted. Future versions may inject SVG XML as a text content block.</td>
             </tr>
             <tr>
               <td><strong>hybrid</strong></td>
@@ -464,7 +488,7 @@ Date          Runs  Images    OpenAI saved Anthropic saved
       <div class="code-block-full">
         <span class="code-lang">toml</span>
         <code>[dependencies]
-shift-preflight = "0.1"</code>
+shift-preflight = "0.3"</code>
       </div>
 
       <div class="code-block-full">
@@ -584,7 +608,24 @@ source ~/.zshrc</code>
     </div>
   </footer>
 
+  <button class="mobile-toc-btn" id="mobile-toc-btn" aria-label="Toggle table of contents">&#9776;</button>
+
   <script>
+    // Mobile TOC toggle
+    var tocBtn = document.getElementById('mobile-toc-btn');
+    var sidebar = document.querySelector('.sidebar');
+    tocBtn.addEventListener('click', function() {
+      var isOpen = sidebar.classList.toggle('mobile-open');
+      tocBtn.innerHTML = isOpen ? '&#10005;' : '&#9776;';
+    });
+    // Close sidebar when a link is clicked on mobile
+    sidebar.addEventListener('click', function(e) {
+      if (e.target.tagName === 'A') {
+        sidebar.classList.remove('mobile-open');
+        tocBtn.innerHTML = '&#9776;';
+      }
+    });
+
     // Highlight active sidebar link on scroll
     var sections = document.querySelectorAll('h2[id], h3[id]');
     var links = document.querySelectorAll('.sidebar a');
