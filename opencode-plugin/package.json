@@ -1,0 +1,56 @@
+{
+  "name": "opencode-shift-proxy",
+  "version": "0.5.1",
+  "description": "OpenCode plugin — auto-starts the SHIFT image optimization proxy for transparent token savings",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun build index.ts --outdir dist --target node && tsc --declaration --emitDeclarationOnly --outDir dist",
+    "prepublishOnly": "bun run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "shift",
+    "image-optimization",
+    "token-optimization",
+    "ai",
+    "anthropic",
+    "openai",
+    "proxy",
+    "multimodal",
+    "preflight"
+  ],
+  "author": "Aaron Hogue",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alohaninja/shift",
+    "directory": "opencode-plugin"
+  },
+  "homepage": "https://github.com/alohaninja/shift/tree/main/opencode-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/alohaninja/shift/issues"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=0.15.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^0.15.0",
+    "@types/bun": "^1.3.1",
+    "typescript": "^5.9.0"
+  }
+}

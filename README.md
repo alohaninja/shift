@@ -139,6 +139,33 @@ export GEMINI_API_BASE=http://localhost:8787        # Gemini CLI
 
 See [`runtime/README.md`](runtime/README.md) for full documentation.
 
+**OpenCode Plugin** — auto-starts the proxy on [OpenCode](https://opencode.ai) launch:
+
+```json
+{
+  "plugin": ["opencode-shift-proxy"],
+  "provider": {
+    "anthropic": {
+      "options": {
+        "baseURL": "http://localhost:8787"
+      }
+    }
+  }
+}
+```
+
+See [`opencode-plugin/README.md`](opencode-plugin/README.md) for setup details.
+
+## Agent integrations
+
+| Agent | Integration | Setup |
+|-------|------------|-------|
+| [OpenCode](https://opencode.ai) | [opencode-shift-proxy](opencode-plugin/) plugin | `"plugin": ["opencode-shift-proxy"]` + provider `baseURL` |
+| Claude Code | HTTP Proxy | `ANTHROPIC_BASE_URL=http://localhost:8787 claude` |
+| Codex CLI | HTTP Proxy | `OPENAI_BASE_URL=http://localhost:8787 codex` |
+| Gemini CLI | HTTP Proxy | `GEMINI_API_BASE=http://localhost:8787 gemini` |
+| AI SDK apps | Middleware | `wrapLanguageModel({ middleware: shiftMiddleware() })` |
+
 ## Install
 
 ### Homebrew (macOS/Linux)
