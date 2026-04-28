@@ -7,6 +7,19 @@ export { detectProviderFromModel, detectProviderFromRoute } from "./provider-det
 export { toBuffer, fromBuffer, isOptimizableImage } from "./data-convert.js";
 export { optimizeImage, optimizePayload } from "./optimizer.js";
 export { createMetrics, summarizeMetrics } from "./metrics.js";
+export {
+  recordRun,
+  buildRunRecord,
+  getSessionStats,
+  resetSessionStats,
+  defaultStatsPath,
+} from "./stats.js";
+export type {
+  RunRecord,
+  TokenSavings,
+  SessionStats,
+  RecordRunInput,
+} from "./stats.js";
 export type {
   DriveMode,
   ShiftProvider,
