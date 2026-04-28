@@ -22,6 +22,45 @@ function createMockShell(behavior: "resolve" | "reject"): BunShell {
   return shellFn;
 }
 
+/**
+ * Build a mock shell that tracks the commands it receives and lets
+ * each command resolve or reject independently.
+ *
+ * Returns the shell function and an array of captured command strings.
+ */
+function createTrackingShell(
+  commandResults: Record<string, "resolve" | "reject"> = {},
+) {
+  const calls: string[] = [];
+
+  const shellFn = ((strings: TemplateStringsArray, ...values: unknown[]) => {
+    // Reconstruct the template literal into a single command string
+    let cmd = strings[0];
+    for (let i = 0; i < values.length; i++) {
+      cmd += String(values[i]) + strings[i + 1];
+    }
+    calls.push(cmd);
+
+    // Determine result based on command content
+    let shouldReject = false;
+    for (const [pattern, result] of Object.entries(commandResults)) {
+      if (cmd.includes(pattern)) {
+        shouldReject = result === "reject";
+        break;
+      }
+    }
+
+    const promise = shouldReject
+      ? Promise.reject(new Error(`command failed: ${cmd}`))
+      : Promise.resolve({ exitCode: 0, stdout: Buffer.from(""), stderr: Buffer.from("") });
+
+    (promise as any).quiet = () => promise;
+    return promise;
+  }) as unknown as BunShell;
+
+  return { shell: shellFn, calls };
+}
+
 /** Build a minimal PluginInput with the given shell. */
 function createPluginInput(shell: BunShell) {
   return {
@@ -69,20 +108,17 @@ describe("ShiftProxyPlugin", () => {
   let warnSpy: ReturnType<typeof spyOn>;
   let logSpy: ReturnType<typeof spyOn>;
   let originalFetch: typeof globalThis.fetch;
-  let originalSpawn: typeof Bun.spawn;
 
   beforeEach(() => {
     warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     originalFetch = globalThis.fetch;
-    originalSpawn = Bun.spawn;
   });
 
   afterEach(() => {
     warnSpy.mockRestore();
     logSpy.mockRestore();
     globalThis.fetch = originalFetch;
-    Bun.spawn = originalSpawn;
   });
 
   // -------------------------------------------------------------------------
@@ -106,51 +142,50 @@ describe("ShiftProxyPlugin", () => {
   // Path 2: shift-ai installed, proxy already running at correct version → skip
   // -------------------------------------------------------------------------
   describe("when proxy is already running at correct version", () => {
-    it("returns empty hooks without spawning", async () => {
+    it("returns empty hooks without calling proxy ensure", async () => {
       const fetchMock = mock(() =>
         Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE)),
       );
       globalThis.fetch = fetchMock as any;
 
-      const spawnMock = mock(() => {}) as any;
-      Bun.spawn = spawnMock;
+      const { shell, calls } = createTrackingShell();
 
       const { ShiftProxyPlugin } = await import("./index");
-      const hooks = await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+      const hooks = await ShiftProxyPlugin(createPluginInput(shell));
 
       expect(hooks).toEqual({});
       expect(fetchMock).toHaveBeenCalled();
-      expect(spawnMock).not.toHaveBeenCalled();
+      // Should only have called `which shift-ai`, not `proxy ensure`
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(false);
     });
 
     it("does NOT trust a non-SHIFT service on the same port", async () => {
-      // All health probes return wrong service identity
-      const fetchMock = mock(() =>
-        Promise.resolve(jsonResponse({ status: "ok", service: "some-other-app" })),
-      );
+      let fetchCallCount = 0;
+      const fetchMock = mock(() => {
+        fetchCallCount++;
+        // Both probes return a non-SHIFT service
+        return Promise.resolve(
+          jsonResponse({ status: "ok", service: "some-other-app" }),
+        );
+      });
       globalThis.fetch = fetchMock as any;
 
-      const mockProc = {
-        unref: mock(() => {}),
-        exited: new Promise<number>(() => {}),
-      };
-      const spawnMock = mock(() => mockProc) as any;
-      Bun.spawn = spawnMock;
+      const { shell, calls } = createTrackingShell();
 
       const { ShiftProxyPlugin } = await import("./index");
-      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+      await ShiftProxyPlugin(createPluginInput(shell));
 
-      // Spawn WAS called because the health check didn't match our service
-      expect(spawnMock).toHaveBeenCalled();
-      // Post-spawn health also returns wrong service → warns
+      // Should have called proxy ensure since the health check didn't match
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
+      // Post-ensure health also returns wrong service → warns
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("proxy spawned but not responding"),
+        expect.stringContaining("proxy ensure completed but not yet responding"),
       );
     });
   });
 
   // -------------------------------------------------------------------------
-  // Path 3: proxy running at stale version → restart
+  // Path 3: proxy running at stale version → stop then ensure
   // -------------------------------------------------------------------------
   describe("when proxy is running at a stale version", () => {
     it("logs version mismatch and restarts the proxy", async () => {
@@ -166,37 +201,10 @@ describe("ShiftProxyPlugin", () => {
       });
       globalThis.fetch = fetchMock as any;
 
-      // Mock lsof for stopProxy — return a fake PID
-      const lsofMockProc = {
-        stdout: new ReadableStream({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode("12345\n"));
-            controller.close();
-          },
-        }),
-        exited: Promise.resolve(0),
-      };
-
-      const newProxyProc = {
-        unref: mock(() => {}),
-        exited: new Promise<number>(() => {}),
-      };
-
-      let spawnCallCount = 0;
-      const spawnMock = mock((..._args: any[]) => {
-        spawnCallCount++;
-        // First spawn call is lsof from stopProxy
-        if (spawnCallCount === 1) return lsofMockProc;
-        // Second spawn call is the new proxy
-        return newProxyProc;
-      }) as any;
-      Bun.spawn = spawnMock;
-
-      // Mock process.kill so we don't actually kill anything
-      const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+      const { shell, calls } = createTrackingShell();
 
       const { ShiftProxyPlugin } = await import("./index");
-      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+      await ShiftProxyPlugin(createPluginInput(shell));
 
       // Should have logged the version mismatch
       expect(logSpy).toHaveBeenCalledWith(
@@ -206,70 +214,19 @@ describe("ShiftProxyPlugin", () => {
         expect.stringContaining(`expected ${PACKAGE_VERSION}`),
       );
 
-      // Should have tried to kill the old process
-      expect(killSpy).toHaveBeenCalledWith(12345, "SIGTERM");
+      // Should have called proxy stop then proxy ensure
+      expect(calls.some((c) => c.includes("proxy stop"))).toBe(true);
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
 
-      // Verify lsof was called with -sTCP:LISTEN to avoid killing clients
-      const [lsofArgs] = spawnMock.mock.calls[0];
-      expect(lsofArgs).toContain("-sTCP:LISTEN");
+      // Stop should come before ensure
+      const stopIdx = calls.findIndex((c) => c.includes("proxy stop"));
+      const ensureIdx = calls.findIndex((c) => c.includes("proxy ensure"));
+      expect(stopIdx).toBeLessThan(ensureIdx);
 
-      // Should have spawned a new proxy
-      expect(spawnMock).toHaveBeenCalledTimes(2); // lsof + npx
-      const [npxArgs] = spawnMock.mock.calls[1];
-      expect(npxArgs[0]).toBe("npx");
-      expect(npxArgs[1]).toMatch(/^@shift-preflight\/runtime@/);
-
-      killSpy.mockRestore();
-    });
-
-    it("excludes own PID from kill list", async () => {
-      let fetchCallCount = 0;
-      const fetchMock = mock(() => {
-        fetchCallCount++;
-        if (fetchCallCount === 1) {
-          return Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE_STALE));
-        }
-        return Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE));
-      });
-      globalThis.fetch = fetchMock as any;
-
-      // lsof returns our own PID alongside the proxy PID
-      const selfPid = process.pid;
-      const lsofMockProc = {
-        stdout: new ReadableStream({
-          start(controller) {
-            controller.enqueue(
-              new TextEncoder().encode(`${selfPid}\n54321\n`),
-            );
-            controller.close();
-          },
-        }),
-        exited: Promise.resolve(0),
-      };
-
-      const newProxyProc = {
-        unref: mock(() => {}),
-        exited: new Promise<number>(() => {}),
-      };
-
-      let spawnCallCount = 0;
-      const spawnMock = mock((..._args: any[]) => {
-        spawnCallCount++;
-        if (spawnCallCount === 1) return lsofMockProc;
-        return newProxyProc;
-      }) as any;
-      Bun.spawn = spawnMock;
-
-      const killSpy = spyOn(process, "kill").mockImplementation(() => true);
-
-      const { ShiftProxyPlugin } = await import("./index");
-      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
-
-      // Should only kill the OTHER PID, not our own
-      expect(killSpy).toHaveBeenCalledWith(54321, "SIGTERM");
-      expect(killSpy).not.toHaveBeenCalledWith(selfPid, "SIGTERM");
-
-      killSpy.mockRestore();
+      // Should log successful start
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`proxy v${PACKAGE_VERSION} started on port`),
+      );
     });
 
     it("treats proxy with no version field as stale", async () => {
@@ -283,51 +240,50 @@ describe("ShiftProxyPlugin", () => {
       });
       globalThis.fetch = fetchMock as any;
 
-      const lsofMockProc = {
-        stdout: new ReadableStream({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode("99999\n"));
-            controller.close();
-          },
-        }),
-        exited: Promise.resolve(0),
-      };
-
-      const newProxyProc = {
-        unref: mock(() => {}),
-        exited: new Promise<number>(() => {}),
-      };
-
-      let spawnCallCount = 0;
-      const spawnMock = mock((..._args: any[]) => {
-        spawnCallCount++;
-        if (spawnCallCount === 1) return lsofMockProc;
-        return newProxyProc;
-      }) as any;
-      Bun.spawn = spawnMock;
-
-      const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+      const { shell, calls } = createTrackingShell();
 
       const { ShiftProxyPlugin } = await import("./index");
-      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+      await ShiftProxyPlugin(createPluginInput(shell));
 
       // Should log mismatch with "unknown" version
       expect(logSpy).toHaveBeenCalledWith(
         expect.stringContaining("version mismatch: running unknown"),
       );
 
-      // Should have spawned a new proxy after stopping the old one
-      expect(spawnMock).toHaveBeenCalledTimes(2);
+      // Should have called stop then ensure
+      expect(calls.some((c) => c.includes("proxy stop"))).toBe(true);
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
+    });
 
-      killSpy.mockRestore();
+    it("proceeds with ensure even if stop fails", async () => {
+      let fetchCallCount = 0;
+      const fetchMock = mock(() => {
+        fetchCallCount++;
+        if (fetchCallCount === 1) {
+          return Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE_STALE));
+        }
+        return Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE));
+      });
+      globalThis.fetch = fetchMock as any;
+
+      // Make proxy stop fail — ensure should still proceed
+      const { shell, calls } = createTrackingShell({ "proxy stop": "reject" });
+
+      const { ShiftProxyPlugin } = await import("./index");
+      await ShiftProxyPlugin(createPluginInput(shell));
+
+      // Stop was attempted even though it failed
+      expect(calls.some((c) => c.includes("proxy stop"))).toBe(true);
+      // Ensure was still called
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
     });
   });
 
   // -------------------------------------------------------------------------
-  // Path 4: spawn proxy — success (no proxy running initially)
+  // Path 4: no proxy running → start via ensure
   // -------------------------------------------------------------------------
   describe("when proxy needs to be started", () => {
-    it("spawns with correct args, detached, sanitized env, and calls unref", async () => {
+    it("calls proxy ensure and logs success when health check passes", async () => {
       let fetchCallCount = 0;
       const fetchMock = mock(() => {
         fetchCallCount++;
@@ -338,125 +294,54 @@ describe("ShiftProxyPlugin", () => {
       });
       globalThis.fetch = fetchMock as any;
 
-      const mockProc = {
-        unref: mock(() => {}),
-        exited: new Promise<number>(() => {}),
-      };
-      const spawnMock = mock(() => mockProc) as any;
-      Bun.spawn = spawnMock;
+      const { shell, calls } = createTrackingShell();
 
       const { ShiftProxyPlugin } = await import("./index");
-      const hooks = await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+      const hooks = await ShiftProxyPlugin(createPluginInput(shell));
 
       expect(hooks).toEqual({});
-      expect(spawnMock).toHaveBeenCalledTimes(1);
-
-      const [args, opts] = spawnMock.mock.calls[0];
-      // Version is read from package.json — verify it matches the pattern
-      expect(args[0]).toBe("npx");
-      expect(args[1]).toMatch(/^@shift-preflight\/runtime@\d+\.\d+\.\d+$/);
-      expect(args.slice(2)).toEqual(["proxy", "--port", "8787", "--mode", "balanced"]);
-
-      expect(opts.detached).toBe(true);
-      expect(opts.stdout).toBe("ignore");
-      expect(opts.stderr).toBe("ignore");
-      expect(opts.stdin).toBe("ignore");
-
-      // Env is sanitized — should NOT contain API keys
-      expect(opts.env).toBeDefined();
-      expect(opts.env.PATH).toBeDefined();
-      expect(opts.env.HOME).toBeDefined();
-      expect(opts.env.ANTHROPIC_API_KEY).toBeUndefined();
-      expect(opts.env.OPENAI_API_KEY).toBeUndefined();
-
-      expect(mockProc.unref).toHaveBeenCalledTimes(1);
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
+      // Should NOT call stop since nothing was running
+      expect(calls.some((c) => c.includes("proxy stop"))).toBe(false);
 
       expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining("proxy v"),
-      );
-      expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining("started on port 8787"),
+        expect.stringContaining(`proxy v${PACKAGE_VERSION} started on port 8787`),
       );
     });
 
-    it("warns when proxy exits immediately with nonzero code", async () => {
+    it("warns when proxy ensure succeeds but health check still fails", async () => {
       const fetchMock = mock(() => Promise.reject(new Error("ECONNREFUSED")));
       globalThis.fetch = fetchMock as any;
 
-      const mockProc = {
-        unref: mock(() => {}),
-        exited: Promise.resolve(1),
-      };
-      const spawnMock = mock(() => mockProc) as any;
-      Bun.spawn = spawnMock;
+      const { shell, calls } = createTrackingShell();
 
       const { ShiftProxyPlugin } = await import("./index");
-      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+      await ShiftProxyPlugin(createPluginInput(shell));
 
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("proxy exited immediately with code 1"),
-      );
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("To bypass"),
-      );
-    });
-
-    it("warns when proxy exits immediately with code 0", async () => {
-      const fetchMock = mock(() => Promise.reject(new Error("ECONNREFUSED")));
-      globalThis.fetch = fetchMock as any;
-
-      const mockProc = {
-        unref: mock(() => {}),
-        exited: Promise.resolve(0),
-      };
-      const spawnMock = mock(() => mockProc) as any;
-      Bun.spawn = spawnMock;
-
-      const { ShiftProxyPlugin } = await import("./index");
-      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
-
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("proxy exited immediately with code 0"),
-      );
-    });
-
-    it("warns when proxy spawns but health check fails", async () => {
-      const fetchMock = mock(() => Promise.reject(new Error("ECONNREFUSED")));
-      globalThis.fetch = fetchMock as any;
-
-      const mockProc = {
-        unref: mock(() => {}),
-        exited: new Promise<number>(() => {}),
-      };
-      const spawnMock = mock(() => mockProc) as any;
-      Bun.spawn = spawnMock;
-
-      const { ShiftProxyPlugin } = await import("./index");
-      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
-
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("proxy spawned but not responding"),
+        expect.stringContaining("proxy ensure completed but not yet responding"),
       );
     });
   });
 
   // -------------------------------------------------------------------------
-  // Path 5: spawn fails entirely
+  // Path 5: proxy ensure fails entirely
   // -------------------------------------------------------------------------
-  describe("when spawn throws", () => {
+  describe("when proxy ensure fails", () => {
     it("warns with actionable error message", async () => {
       const fetchMock = mock(() => Promise.reject(new Error("ECONNREFUSED")));
       globalThis.fetch = fetchMock as any;
 
-      const spawnMock = mock(() => {
-        throw new Error("ENOENT: npx not found");
-      }) as any;
-      Bun.spawn = spawnMock;
+      const { shell, calls } = createTrackingShell({
+        "proxy ensure": "reject",
+      });
 
       const { ShiftProxyPlugin } = await import("./index");
-      const hooks = await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+      const hooks = await ShiftProxyPlugin(createPluginInput(shell));
 
       expect(hooks).toEqual({});
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining("proxy failed to start"),
       );
@@ -471,22 +356,20 @@ describe("ShiftProxyPlugin", () => {
   // -------------------------------------------------------------------------
   describe("health probe edge cases", () => {
     it("rejects a response with no service field", async () => {
-      const fetchMock = mock(() =>
-        Promise.resolve(jsonResponse({ status: "ok" })),
-      );
+      let fetchCallCount = 0;
+      const fetchMock = mock(() => {
+        fetchCallCount++;
+        // Both probes return no service field
+        return Promise.resolve(jsonResponse({ status: "ok" }));
+      });
       globalThis.fetch = fetchMock as any;
 
-      const mockProc = {
-        unref: mock(() => {}),
-        exited: new Promise<number>(() => {}),
-      };
-      const spawnMock = mock(() => mockProc) as any;
-      Bun.spawn = spawnMock;
+      const { shell, calls } = createTrackingShell();
 
       const { ShiftProxyPlugin } = await import("./index");
-      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+      await ShiftProxyPlugin(createPluginInput(shell));
 
-      expect(spawnMock).toHaveBeenCalled();
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
     });
 
     it("handles non-JSON response gracefully", async () => {
@@ -495,59 +378,52 @@ describe("ShiftProxyPlugin", () => {
       );
       globalThis.fetch = fetchMock as any;
 
-      const mockProc = {
-        unref: mock(() => {}),
-        exited: new Promise<number>(() => {}),
-      };
-      const spawnMock = mock(() => mockProc) as any;
-      Bun.spawn = spawnMock;
+      const { shell, calls } = createTrackingShell();
 
       const { ShiftProxyPlugin } = await import("./index");
-      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+      await ShiftProxyPlugin(createPluginInput(shell));
 
-      expect(spawnMock).toHaveBeenCalled();
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
     });
 
     it("rejects a 500 response even with correct service field", async () => {
-      const fetchMock = mock(() =>
-        Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE, 500)),
-      );
+      let fetchCallCount = 0;
+      const fetchMock = mock(() => {
+        fetchCallCount++;
+        return Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE, fetchCallCount === 1 ? 500 : 200));
+      });
       globalThis.fetch = fetchMock as any;
 
-      const mockProc = {
-        unref: mock(() => {}),
-        exited: new Promise<number>(() => {}),
-      };
-      const spawnMock = mock(() => mockProc) as any;
-      Bun.spawn = spawnMock;
+      const { shell, calls } = createTrackingShell();
 
       const { ShiftProxyPlugin } = await import("./index");
-      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+      await ShiftProxyPlugin(createPluginInput(shell));
 
-      // 500 should be treated as unhealthy — spawn a new one
-      expect(spawnMock).toHaveBeenCalled();
+      // 500 should be treated as unhealthy — call ensure
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
     });
 
     it("rejects a service identity that is a superstring", async () => {
-      const fetchMock = mock(() =>
-        Promise.resolve(
-          jsonResponse({ status: "ok", service: "@shift-preflight/runtime proxy EXTRA" }),
-        ),
-      );
+      let fetchCallCount = 0;
+      const fetchMock = mock(() => {
+        fetchCallCount++;
+        return Promise.resolve(
+          jsonResponse(
+            fetchCallCount === 1
+              ? { status: "ok", service: "@shift-preflight/runtime proxy EXTRA" }
+              : SHIFT_HEALTH_RESPONSE,
+          ),
+        );
+      });
       globalThis.fetch = fetchMock as any;
 
-      const mockProc = {
-        unref: mock(() => {}),
-        exited: new Promise<number>(() => {}),
-      };
-      const spawnMock = mock(() => mockProc) as any;
-      Bun.spawn = spawnMock;
+      const { shell, calls } = createTrackingShell();
 
       const { ShiftProxyPlugin } = await import("./index");
-      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+      await ShiftProxyPlugin(createPluginInput(shell));
 
       // Strict === means superstring doesn't match
-      expect(spawnMock).toHaveBeenCalled();
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
     });
   });
 });
