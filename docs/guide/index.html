@@ -212,6 +212,7 @@
       <div class="sidebar-section">
         <div class="sidebar-title">Runtime</div>
         <a href="#runtime">Overview</a>
+        <a href="#opencode-plugin">OpenCode Plugin</a>
         <a href="#ai-sdk-middleware">AI SDK Middleware</a>
         <a href="#http-proxy">HTTP Proxy</a>
       </div>
@@ -572,6 +573,49 @@ eprintln!("{}", report); <span class="comment">// what changed and why</span></c
         <span class="code-lang">bash</span>
         <code>npm install @shift-preflight/runtime</code>
       </div>
+
+      <h3 id="opencode-plugin">OpenCode Plugin</h3>
+
+      <p>The <code>@shift-preflight/opencode-plugin</code> package auto-starts the SHIFT proxy on every <a href="https://opencode.ai" target="_blank" rel="noopener">OpenCode</a> launch. No manual proxy management needed.</p>
+
+      <p>Add the plugin and provider base URL to your <code>opencode.json</code> (project-level or <code>~/.config/opencode/opencode.json</code>):</p>
+
+      <div class="code-block-full">
+        <span class="code-lang">json</span>
+        <code>{
+  "plugin": ["@shift-preflight/opencode-plugin"],
+  "provider": {
+    "anthropic": {
+      "options": {
+        "baseURL": "http://localhost:8787/v1"
+      }
+    }
+  }
+}</code>
+      </div>
+
+      <p><strong>Important:</strong> The <code>baseURL</code> must include <code>/v1</code>. OpenCode's Anthropic client appends <code>/messages</code> (not <code>/v1/messages</code>) to the base URL.</p>
+
+      <p>On every OpenCode launch the plugin:</p>
+      <ol style="margin: 12px 0 12px 20px; color: var(--text-muted); font-size: 0.9rem; line-height: 1.7;">
+        <li><strong style="color: var(--text);">Checks prerequisites</strong> &mdash; verifies <code>shift-ai</code> is on PATH. Silently skips if not installed.</li>
+        <li><strong style="color: var(--text);">Probes port 8787</strong> &mdash; if the proxy is already running, skips startup. Verifies identity via <code>/health</code>.</li>
+        <li><strong style="color: var(--text);">Starts the proxy</strong> &mdash; spawns a detached background process that outlives the OpenCode session.</li>
+        <li><strong style="color: var(--text);">Verifies startup</strong> &mdash; confirms the proxy is healthy before proceeding.</li>
+      </ol>
+
+      <p>OpenCode auto-installs npm plugins at startup via Bun. No <code>npm install</code> needed. First launch takes ~6 seconds (npx download); subsequent launches detect the running proxy instantly.</p>
+
+      <p>Once the proxy is running, other agents can piggyback on it:</p>
+
+      <div class="code-block-full">
+        <span class="code-lang">bash</span>
+        <code><span class="comment"># Other agents reuse the same proxy</span>
+ANTHROPIC_BASE_URL=http://localhost:8787 claude    <span class="comment"># Claude Code</span>
+OPENAI_BASE_URL=http://localhost:8787 codex        <span class="comment"># Codex CLI</span></code>
+      </div>
+
+      <p>To disable the proxy temporarily, prefix the <code>baseURL</code> key with an underscore (<code>"_baseURL"</code>) in your <code>opencode.json</code>.</p>
 
       <h3 id="ai-sdk-middleware">AI SDK Middleware</h3>
 

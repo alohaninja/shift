@@ -553,23 +553,16 @@
   <section class="modes-section" id="integration">
     <div class="section-inner reveal">
       <h2>Works with any AI agent</h2>
-      <p class="section-sub">CLI, middleware, or proxy &mdash; pick the integration that fits your stack.</p>
+      <p class="section-sub">Plugin, proxy, middleware, or CLI &mdash; pick the integration that fits your stack.</p>
 
-      <div class="modes-grid">
-        <div class="mode-card">
-          <span class="mode-badge mode-perf">CLI</span>
-          <h3 style="color: #22c55e;">Pipe &amp; transform</h3>
-          <p>Pipe any JSON payload through <code>shift-ai</code> directly. Works with any language or toolchain.</p>
-          <div style="margin-top: 16px; padding: 12px; background: var(--bg-alt); border-radius: 8px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted);">
-            cat request.json | shift-ai -p anthropic
-          </div>
-        </div>
-        <div class="mode-card" style="border-color: rgba(56, 189, 248, 0.3);">
-          <span class="mode-badge mode-bal">MIDDLEWARE</span>
-          <h3 style="color: var(--cyan);">AI SDK drop-in</h3>
-          <p>In-process middleware for any <a href="https://sdk.vercel.ai" target="_blank" rel="noopener" style="color: var(--cyan);">Vercel AI SDK</a> app. Zero config, auto-detects provider.</p>
-          <div style="margin-top: 16px; padding: 12px; background: var(--bg-alt); border-radius: 8px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted);">
-            shiftMiddleware({ mode: "balanced" })
+      <div class="modes-grid" style="grid-template-columns: repeat(2, 1fr);">
+        <div class="mode-card" style="border-color: rgba(0, 229, 153, 0.3);">
+          <span class="mode-badge" style="border: 1px solid var(--accent); color: var(--accent);">OPENCODE PLUGIN &middot; RECOMMENDED</span>
+          <h3 style="color: var(--accent);">Zero-config for OpenCode</h3>
+          <p>Auto-starts the proxy on every <a href="https://opencode.ai" target="_blank" rel="noopener" style="color: var(--accent);">OpenCode</a> launch. No manual setup per session.</p>
+          <div style="margin-top: 16px; padding: 12px; background: var(--bg-alt); border-radius: 8px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); line-height: 1.6;">
+            <span style="color: var(--text-dim);">// opencode.json</span><br>
+            "plugin": ["<span style="color: var(--accent);">@shift-preflight/opencode-plugin</span>"]
           </div>
         </div>
         <div class="mode-card">
@@ -580,12 +573,30 @@
             ANTHROPIC_BASE_URL=http://localhost:8787
           </div>
         </div>
+        <div class="mode-card">
+          <span class="mode-badge mode-bal">MIDDLEWARE</span>
+          <h3 style="color: var(--cyan);">AI SDK drop-in</h3>
+          <p>In-process middleware for any <a href="https://sdk.vercel.ai" target="_blank" rel="noopener" style="color: var(--cyan);">Vercel AI SDK</a> app. Zero config, auto-detects provider.</p>
+          <div style="margin-top: 16px; padding: 12px; background: var(--bg-alt); border-radius: 8px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted);">
+            shiftMiddleware({ mode: "balanced" })
+          </div>
+        </div>
+        <div class="mode-card">
+          <span class="mode-badge mode-perf">CLI</span>
+          <h3 style="color: #22c55e;">Pipe &amp; transform</h3>
+          <p>Pipe any JSON payload through <code>shift-ai</code> directly. Works with any language or toolchain.</p>
+          <div style="margin-top: 16px; padding: 12px; background: var(--bg-alt); border-radius: 8px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted);">
+            cat request.json | shift-ai -p anthropic
+          </div>
+        </div>
       </div>
 
       <p style="text-align:center;margin-top:28px;font-size:0.88rem;color:var(--text-muted);">
-        Runtime package: <code style="color:var(--accent);">npm install @shift-preflight/runtime</code>
+        OpenCode plugin: <code style="color:var(--accent);">@shift-preflight/opencode-plugin</code>
         &nbsp;&middot;&nbsp;
-        <a href="guide/#runtime" style="font-weight:600;">Full runtime guide &rarr;</a>
+        Runtime package: <code style="color:var(--accent);">@shift-preflight/runtime</code>
+        &nbsp;&middot;&nbsp;
+        <a href="guide/#opencode-plugin" style="font-weight:600;">Setup guide &rarr;</a>
       </p>
     </div>
   </section>
