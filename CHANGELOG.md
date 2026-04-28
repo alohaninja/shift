@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/alohaninja/shift/compare/v0.6.2...v0.7.0) (2026-04-28)
+
+
+### Features
+
+* **runtime:** record proxy stats to ~/.shift/stats.jsonl ([#27](https://github.com/alohaninja/shift/issues/27)) ([02e0936](https://github.com/alohaninja/shift/commit/02e0936147ca3ebe553b5400ef834f4adbb3dd59))
+
 ## [0.6.2](https://github.com/alohaninja/shift/compare/v0.6.1...v0.6.2) (2026-04-28)
 
 
