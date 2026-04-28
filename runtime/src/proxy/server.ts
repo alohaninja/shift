@@ -18,6 +18,18 @@ import { createGoogleHandler } from "./routes/google.js";
 import { createPassthroughHandler } from "./routes/passthrough.js";
 import { getSessionStats } from "../core/stats.js";
 import type { ProxyConfig } from "./types.js";
+import { createRequire } from "node:module";
+
+/**
+ * Runtime version, inlined at build time by tsup (see tsup.config.ts `define`).
+ * Falls back to package.json for dev/test (vitest runs against source).
+ */
+declare const __RUNTIME_VERSION__: string | undefined;
+
+const RUNTIME_VERSION: string =
+  typeof __RUNTIME_VERSION__ !== "undefined"
+    ? __RUNTIME_VERSION__
+    : (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
 
 /**
  * Create the Hono application with all proxy routes.
@@ -27,9 +39,13 @@ import type { ProxyConfig } from "./types.js";
 export function createProxyApp(config: ProxyConfig = {}): Hono {
   const app = new Hono();
 
-  // Health check
+  // Health check — includes version so agents can detect stale proxies
   app.get("/health", (c) =>
-    c.json({ status: "ok", service: "@shift-preflight/runtime proxy" }),
+    c.json({
+      status: "ok",
+      service: "@shift-preflight/runtime proxy",
+      version: RUNTIME_VERSION,
+    }),
   );
 
   // Session stats endpoint
