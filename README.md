@@ -159,13 +159,40 @@ See [`opencode-plugin/README.md`](opencode-plugin/README.md) for setup details.
 
 ## Agent integrations
 
-| Agent | Integration | Setup |
-|-------|------------|-------|
-| [OpenCode](https://opencode.ai) | [@shift-preflight/opencode-plugin](opencode-plugin/) plugin | `"plugin": ["@shift-preflight/opencode-plugin"]` + provider `baseURL` |
-| Claude Code | HTTP Proxy | `ANTHROPIC_BASE_URL=http://localhost:8787 claude` |
-| Codex CLI | HTTP Proxy | `OPENAI_BASE_URL=http://localhost:8787 codex` |
-| Gemini CLI | HTTP Proxy | `GEMINI_API_BASE=http://localhost:8787 gemini` |
-| AI SDK apps | Middleware | `wrapLanguageModel({ middleware: shiftMiddleware() })` |
+The fastest way to configure all your agents at once:
+
+```bash
+shift-ai setup
+```
+
+This detects installed agents, configures each one, and optionally installs a
+macOS LaunchAgent to keep the proxy running.
+
+| Agent | Method | Setup |
+|-------|--------|-------|
+| **Any agent** | [Interactive setup](#setup) | `shift-ai setup` (auto-detects + configures) |
+| [OpenCode](https://opencode.ai) | [Plugin](opencode-plugin/) (auto) | Plugin auto-starts proxy and sets `baseURL` |
+| [Claude Code](https://claude.ai/code) | [`settings.json`](claude-code-hook/) | Writes `ANTHROPIC_BASE_URL` to `~/.claude/settings.json` |
+| [Codex CLI](https://github.com/openai/codex) | [`config.toml`](codex-plugin/) | Writes `openai_base_url` to `~/.codex/config.toml` |
+| Cursor | Settings UI (manual) | Paste URL into Settings > Models > Override OpenAI Base URL |
+| AI SDK apps | Middleware (in-process) | `wrapLanguageModel({ middleware: shiftMiddleware() })` |
+
+> **Gemini CLI** does not support API base URL overrides and is not currently supported.
+
+### Quick per-agent setup
+
+```bash
+# Claude Code — env var (add to ~/.zshrc)
+eval "$(shift-ai env claude-code)"
+
+# Codex CLI — prints TOML snippet for ~/.codex/config.toml
+shift-ai env codex
+
+# List all agents and their config methods
+shift-ai env --list
+```
+
+All agents share the same proxy on port 8787 — start it once and every agent benefits.
 
 ## Install
 
@@ -271,6 +298,14 @@ Commands:
   shift-ai gain                 Show cumulative token savings
   shift-ai gain --daily         Day-by-day breakdown
   shift-ai gain --format json   Machine-readable output for dashboards
+  shift-ai proxy start          Start the proxy daemon
+  shift-ai proxy stop           Stop the proxy daemon
+  shift-ai proxy status         Show proxy status
+  shift-ai proxy ensure         Start if needed, no-op if healthy
+  shift-ai env <agent>          Output config for an agent
+  shift-ai env --list           List all supported agents and methods
+  shift-ai env --all            Output config for all agents
+  shift-ai setup                Interactive multi-agent setup
 ```
 
 ## Drive modes
@@ -377,6 +412,16 @@ shift/
 │       ├── report.rs    Transformation report with token savings
 │       └── mode.rs      DriveMode, SvgMode, ShiftConfig
 ├── shift-cli/           Binary crate: shift-preflight-cli → shift-ai
+│   └── src/
+│       ├── main.rs      CLI entry point + existing commands
+│       ├── proxy.rs     Proxy daemon lifecycle (start/stop/ensure)
+│       ├── env.rs       Agent env var generation
+│       └── setup.rs     Interactive multi-agent setup
+├── runtime/             @shift-preflight/runtime (TS middleware + proxy)
+├── opencode-plugin/     @shift-preflight/opencode-plugin (OpenCode)
+├── claude-code-hook/    Claude Code integration (settings + installer)
+├── codex-plugin/        Codex CLI integration (env var + installer)
+├── launchagent/         macOS LaunchAgent plist for auto-start
 ├── profiles/            Provider constraint JSON (embedded at compile time)
 ├── tests/
 │   ├── fixtures/        Test images and sample payloads

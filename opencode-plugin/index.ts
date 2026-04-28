@@ -2,11 +2,8 @@ import type { Plugin } from "@opencode-ai/plugin";
 import { version as PACKAGE_VERSION } from "./package.json";
 
 const DEFAULT_PORT = 8787;
-const DEFAULT_MODE = "balanced";
 const PROBE_TIMEOUT_MS = 2_000;
-const SPAWN_SETTLE_MS = 2_000;
 const HEALTH_SERVICE_ID = "@shift-preflight/runtime proxy";
-const RUNTIME_PACKAGE = `@shift-preflight/runtime@${PACKAGE_VERSION}`;
 
 /** Result of probing the running proxy's health endpoint. */
 interface ProxyProbeResult {
@@ -53,15 +50,10 @@ interface ProxyProbeResult {
  * 1. Checks if `shift-ai` is installed — silently skips if not.
  * 2. Probes `localhost:8787/health` — if the SHIFT proxy is already
  *    running **at the expected version**, skips.
- * 3. If the proxy is running an older version, kills it gracefully
- *    before spawning the new one.
- * 4. Spawns `npx @shift-preflight/runtime proxy` as a detached
- *    background process. The proxy listens on port 8787 and optimizes
- *    images in all requests before forwarding to the upstream API.
- * 5. Waits briefly to confirm the proxy is healthy before returning.
+ * 3. If the proxy is running an older version, stops it first.
+ * 4. Runs `shift-ai proxy ensure` to start the proxy if needed.
  *
- * The proxy is shared across OpenCode sessions. Other agents can also
- * use it by setting the appropriate env var:
+ * The proxy is shared across sessions. Other agents can also use it:
  * ```bash
  * ANTHROPIC_BASE_URL=http://localhost:8787 claude   # Claude Code
  * OPENAI_BASE_URL=http://localhost:8787 codex       # Codex CLI
@@ -71,9 +63,8 @@ interface ProxyProbeResult {
  */
 export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
   const port = DEFAULT_PORT;
-  const mode = DEFAULT_MODE;
 
-  // Bail if shift-ai CLI is not installed (proxy depends on it)
+  // Bail if shift-ai CLI is not installed
   try {
     await $`which shift-ai`.quiet();
   } catch {
@@ -85,8 +76,6 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
 
   if (probe.healthy) {
     // Proxy is running — check if it's the version we expect.
-    // If the proxy doesn't report a version, treat it as stale.
-    // Version-aware health was added alongside this plugin change.
     if (probe.version === PACKAGE_VERSION) {
       return {};
     }
@@ -96,66 +85,27 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
     console.log(
       `[shift] proxy version mismatch: running ${old}, expected ${PACKAGE_VERSION} — restarting`,
     );
-    await stopProxy(port);
+    try {
+      await $`shift-ai proxy stop --quiet`.quiet();
+    } catch {
+      // Best-effort — proxy ensure will handle port conflicts
+    }
   }
 
-  // Start proxy as a detached background process.
-  // Only pass PATH/HOME/SHELL to the child — the proxy doesn't need API keys
-  // and we don't want npm lifecycle scripts to have access to them.
+  // Use `shift-ai proxy ensure` — handles daemon lifecycle, PID files,
+  // health checks, and version-pinned npx spawn internally.
   try {
-    const proc = Bun.spawn(
-      [
-        "npx",
-        RUNTIME_PACKAGE,
-        "proxy",
-        "--port",
-        String(port),
-        "--mode",
-        mode,
-      ],
-      {
-        detached: true,
-        stdout: "ignore",
-        stderr: "ignore",
-        stdin: "ignore",
-        env: {
-          PATH: process.env.PATH ?? "",
-          HOME: process.env.HOME ?? "",
-          SHELL: process.env.SHELL ?? "",
-          TMPDIR: process.env.TMPDIR ?? "",
-          npm_config_registry: process.env.npm_config_registry ?? "",
-        },
-      },
-    );
-    proc.unref();
+    await $`shift-ai proxy ensure --quiet`.quiet();
 
-    // Detect immediate crash vs successful startup.
-    // Clear the timer when proc.exited wins the race to avoid leaking it.
-    let settleTimer: ReturnType<typeof setTimeout>;
-    const exitCode = await Promise.race([
-      proc.exited.then((code) => {
-        clearTimeout(settleTimer);
-        return code;
-      }),
-      new Promise<null>((r) => {
-        settleTimer = setTimeout(() => r(null), SPAWN_SETTLE_MS);
-      }),
-    ]);
-
-    if (exitCode !== null) {
-      console.warn(`[shift] proxy exited immediately with code ${exitCode}`);
-      console.warn(
-        `[shift] To bypass, remove baseURL from provider config in opencode.json`,
+    const postProbe = await probeShiftProxy(port);
+    if (postProbe.healthy) {
+      console.log(
+        `[shift] proxy v${PACKAGE_VERSION} started on port ${port}`,
       );
     } else {
-      const postProbe = await probeShiftProxy(port);
-      if (postProbe.healthy) {
-        console.log(`[shift] proxy v${PACKAGE_VERSION} started on port ${port} (mode: ${mode})`);
-      } else {
-        console.warn(
-          `[shift] proxy spawned but not responding on port ${port} — it may still be starting`,
-        );
-      }
+      console.warn(
+        `[shift] proxy ensure completed but not yet responding on port ${port}`,
+      );
     }
   } catch (err) {
     console.warn(`[shift] proxy failed to start: ${err}`);
@@ -185,63 +135,6 @@ async function probeShiftProxy(port: number): Promise<ProxyProbeResult> {
     return { healthy: true, version: body.version };
   } catch {
     return { healthy: false };
-  }
-}
-
-/** Max time to wait for lsof to complete. */
-const LSOF_TIMEOUT_MS = 5_000;
-
-/** Time to wait after SIGTERM for the port to free up. */
-const KILL_SETTLE_MS = 1_000;
-
-/**
- * Gracefully stop a running SHIFT proxy by finding and killing
- * the listener process on the port.
- *
- * Uses `-sTCP:LISTEN` to only match the listening process (not connected
- * clients) and excludes the current process PID to avoid self-kill.
- */
-async function stopProxy(port: number): Promise<void> {
-  try {
-    // Find the PID of the LISTENING process on the port.
-    // -sTCP:LISTEN filters to listeners only (excludes connected clients
-    // like our own health-check connection that may still be in the fd table).
-    const proc = Bun.spawn(
-      ["lsof", "-ti", `tcp:${port}`, "-sTCP:LISTEN"],
-      { stdout: "pipe", stderr: "ignore" },
-    );
-
-    const output = await Promise.race([
-      new Response(proc.stdout).text(),
-      new Promise<string>((_, reject) =>
-        setTimeout(() => reject(new Error("lsof timeout")), LSOF_TIMEOUT_MS),
-      ),
-    ]);
-
-    const selfPid = process.pid;
-    const pids = output
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .map((s) => parseInt(s, 10))
-      .filter((n) => !isNaN(n) && n !== selfPid);
-
-    for (const pid of pids) {
-      try {
-        process.kill(pid, "SIGTERM");
-      } catch {
-        // Process may have already exited
-      }
-    }
-
-    // Wait briefly for the port to free up
-    if (pids.length > 0) {
-      await new Promise((r) => setTimeout(r, KILL_SETTLE_MS));
-    }
-  } catch {
-    // Best-effort — if we can't stop it (lsof missing, timeout, etc.),
-    // the new spawn will fail on port conflict and the user will see
-    // a clear error message.
   }
 }
 
