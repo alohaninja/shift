@@ -8,6 +8,8 @@ import {
   recordRun,
   getSessionStats,
   resetSessionStats,
+  defaultStatsPath,
+  _resetNodeDeps,
   type RunRecord,
 } from "../../src/core/stats.js";
 
@@ -304,5 +306,159 @@ describe("session stats", () => {
     vi.restoreAllMocks();
     await unlink(symlinkPath).catch(() => {});
     await unlink(realPath).catch(() => {});
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// Lazy-load / non-Node fallback tests
+// ────────────────────────────────────────────────────────────────────
+
+describe("lazy-load Node deps", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("_resetNodeDeps forces re-load on next call", async () => {
+    // First call loads deps successfully (we're in Node)
+    const statsPath = tmpStatsPath();
+    const record = buildRunRecord({
+      provider: "anthropic",
+      originalBytes: 50_000,
+      optimizedBytes: 20_000,
+      durationMs: 50,
+    });
+
+    await recordRun(record, statsPath);
+    const content = await readFile(statsPath, "utf-8");
+    expect(content.trim().length).toBeGreaterThan(0);
+
+    // Reset and verify it works again (deps are re-loaded)
+    _resetNodeDeps();
+    const statsPath2 = tmpStatsPath();
+    await recordRun(record, statsPath2);
+    const content2 = await readFile(statsPath2, "utf-8");
+    expect(content2.trim().length).toBeGreaterThan(0);
+
+    await unlink(statsPath).catch(() => {});
+    await unlink(statsPath2).catch(() => {});
+  });
+
+  it("defaultStatsPath returns a non-empty path in Node", async () => {
+    _resetNodeDeps();
+    const path = await defaultStatsPath();
+    expect(path).toMatch(/\.shift[/\\]stats\.jsonl$/);
+    expect(path.length).toBeGreaterThan(0);
+  });
+
+  it("concurrent recordRun calls share the same load (no double-load race)", async () => {
+    _resetNodeDeps();
+    resetSessionStats();
+
+    const statsPath = tmpStatsPath();
+    const record = buildRunRecord({
+      provider: "anthropic",
+      originalBytes: 50_000,
+      optimizedBytes: 20_000,
+      durationMs: 50,
+    });
+
+    // Fire 5 concurrent recordRun calls — all should succeed
+    await Promise.all(
+      Array.from({ length: 5 }, () => recordRun(record, statsPath)),
+    );
+
+    const stats = getSessionStats();
+    expect(stats.totalRequests).toBe(5);
+
+    const content = await readFile(statsPath, "utf-8");
+    const lines = content.trim().split("\n");
+    expect(lines).toHaveLength(5);
+
+    await unlink(statsPath).catch(() => {});
+  });
+});
+
+describe("non-Node fallback (simulated)", () => {
+  beforeEach(() => {
+    _resetNodeDeps();
+    resetSessionStats();
+  });
+
+  afterEach(() => {
+    _resetNodeDeps(); // restore to undefined so subsequent tests re-load real deps
+    vi.restoreAllMocks();
+  });
+
+  it("recordRun accumulates session stats but skips file write when deps unavailable", async () => {
+    // Mock dynamic import to simulate non-Node environment
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // We need to force loadNodeDeps to fail. We do this by:
+    // 1. Resetting deps (already done in beforeEach)
+    // 2. Mocking the global import to reject for node: specifiers
+    //    Since vitest runs in Node where dynamic import() always succeeds
+    //    for node: modules, we instead directly test the contract by
+    //    importing the module fresh with mocked deps.
+    //
+    // The most reliable approach: call _resetNodeDeps, then mock
+    // the "node:fs/promises" module to throw on import, and verify
+    // recordRun still accumulates.
+
+    // Use vi.mock to make node:fs/promises throw
+    vi.doMock("node:fs/promises", () => {
+      throw new Error("Simulated: node:fs/promises unavailable");
+    });
+
+    // Force re-import to pick up the mock
+    const { recordRun: recordRunFresh, getSessionStats: getStatsFresh, _resetNodeDeps: resetFresh } =
+      await import("../../src/core/stats.js");
+    resetFresh();
+
+    const record = buildRunRecord({
+      provider: "anthropic",
+      originalBytes: 100_000,
+      optimizedBytes: 40_000,
+      durationMs: 100,
+      source: "proxy",
+    });
+
+    const statsPath = tmpStatsPath();
+    await recordRunFresh(record, statsPath);
+
+    // Session stats should still accumulate
+    const stats = getStatsFresh();
+    expect(stats.totalRequests).toBe(1);
+    expect(stats.totalBytesSaved).toBe(60_000);
+
+    // File should NOT have been created
+    const exists = await readFile(statsPath, "utf-8").then(
+      () => true,
+      () => false,
+    );
+    expect(exists).toBe(false);
+
+    // Should have warned about unavailable Node APIs
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Node APIs unavailable"),
+    );
+
+    vi.doUnmock("node:fs/promises");
+  });
+
+  it("defaultStatsPath returns empty string when deps unavailable", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.doMock("node:fs/promises", () => {
+      throw new Error("Simulated: node:fs/promises unavailable");
+    });
+
+    const { defaultStatsPath: defaultPathFresh, _resetNodeDeps: resetFresh } =
+      await import("../../src/core/stats.js");
+    resetFresh();
+
+    const path = await defaultPathFresh();
+    expect(path).toBe("");
+
+    vi.doUnmock("node:fs/promises");
   });
 });

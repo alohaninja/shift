@@ -32,33 +32,48 @@ interface NodeDeps {
 }
 
 let _nodeDeps: NodeDeps | null | undefined; // undefined = not yet loaded
+let _loadPromise: Promise<NodeDeps | null> | undefined;
+
+/** Path segments for the default stats file (extracted to avoid duplication). */
+const STATS_DIR = ".shift";
+const STATS_FILE = "stats.jsonl";
 
 async function loadNodeDeps(): Promise<NodeDeps | null> {
   if (_nodeDeps !== undefined) return _nodeDeps;
-  try {
-    const [fs, os, path] = await Promise.all([
-      import("node:fs/promises"),
-      import("node:os"),
-      import("node:path"),
-    ]);
-    _nodeDeps = {
-      appendFile: fs.appendFile,
-      lstat: fs.lstat,
-      mkdir: fs.mkdir,
-      homedir: os.homedir,
-      dirname: path.dirname,
-      join: path.join,
-    };
-  } catch {
-    // Not in a Node-compatible environment — file writes will no-op
-    _nodeDeps = null;
+  // Cache the in-flight promise so concurrent callers share one load.
+  if (!_loadPromise) {
+    _loadPromise = (async (): Promise<NodeDeps | null> => {
+      try {
+        const [fs, os, path] = await Promise.all([
+          import("node:fs/promises"),
+          import("node:os"),
+          import("node:path"),
+        ]);
+        _nodeDeps = {
+          appendFile: fs.appendFile,
+          lstat: fs.lstat,
+          mkdir: fs.mkdir,
+          homedir: os.homedir,
+          dirname: path.dirname,
+          join: path.join,
+        };
+      } catch {
+        // Not in a Node-compatible environment — file writes will no-op
+        console.warn(
+          "[shift-runtime] Node APIs unavailable — stats file writes disabled",
+        );
+        _nodeDeps = null;
+      }
+      return _nodeDeps;
+    })();
   }
-  return _nodeDeps;
+  return _loadPromise;
 }
 
 /** @internal — reset for testing */
 export function _resetNodeDeps(): void {
   _nodeDeps = undefined;
+  _loadPromise = undefined;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -181,7 +196,7 @@ function accumulateSession(record: RunRecord): void {
  * Default stats file path: ~/.shift/stats.jsonl
  *
  * Returns the cached path if Node deps have already been loaded,
- * otherwise triggers a synchronous load. Returns empty string in
+ * otherwise triggers an async lazy load. Returns empty string in
  * non-Node environments. The main code path in recordRun() constructs
  * the path internally via lazy deps — this function exists primarily
  * for external callers and tests.
@@ -189,7 +204,7 @@ function accumulateSession(record: RunRecord): void {
 export async function defaultStatsPath(): Promise<string> {
   const deps = await loadNodeDeps();
   if (!deps) return "";
-  return deps.join(deps.homedir(), ".shift", "stats.jsonl");
+  return deps.join(deps.homedir(), STATS_DIR, STATS_FILE);
 }
 
 /**
@@ -221,7 +236,7 @@ export async function recordRun(
   const deps = await loadNodeDeps();
   if (!deps) return; // silently skip file write in non-Node environments
 
-  const filePath = statsPath ?? deps.join(deps.homedir(), ".shift", "stats.jsonl");
+  const filePath = statsPath ?? deps.join(deps.homedir(), STATS_DIR, STATS_FILE);
   try {
     // Ensure parent directory exists
     const dir = deps.dirname(filePath);
