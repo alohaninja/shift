@@ -1,5 +1,5 @@
 [workspace]
-members = ["shift-core", "shift-cli"]
+members = ["shift-core", "shift-cli", "shift-proxy"]
 resolver = "2"
 
 [workspace.package]

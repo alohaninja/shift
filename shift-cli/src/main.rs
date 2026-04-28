@@ -267,9 +267,9 @@ fn run() -> Result<()> {
                     foreground,
                 } => {
                     if *foreground {
-                        // In foreground mode, just start and block
-                        // (for LaunchAgent / systemd — the proxy itself handles this)
-                        proxy::start(Some(*port), Some(mode.as_str()), *quiet)
+                        // Run the native Rust proxy server in foreground (blocking).
+                        // Used by daemon spawn and LaunchAgent/systemd.
+                        proxy::run_foreground(*port, mode.as_str())
                     } else {
                         proxy::start(Some(*port), Some(mode.as_str()), *quiet)
                     }

@@ -1,9 +1,8 @@
 //! Proxy daemon lifecycle management.
 //!
 //! Provides `start`, `stop`, `status`, and `ensure` operations for the
-//! SHIFT preflight proxy. The proxy itself is the Node.js Hono server
-//! from `@shift-preflight/runtime`; this module manages its lifecycle
-//! as a background daemon.
+//! SHIFT preflight proxy. The proxy is a native Rust HTTP server (axum)
+//! running as a background daemon. No Node.js required.
 //!
 //! State is stored in `~/.shift/`:
 //!   - `proxy.pid`  — PID of the running proxy process
@@ -117,17 +116,6 @@ pub fn start(port: Option<u16>, mode: Option<&str>, quiet: bool) -> Result<()> {
         return Ok(());
     }
 
-    // Check that npx is available
-    Command::new("which")
-        .arg("npx")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .context("failed to check for npx")?
-        .success()
-        .then_some(())
-        .context("npx not found — install Node.js or use `brew install node`")?;
-
     let log = log_file()?;
     let log_handle = fs::OpenOptions::new()
         .create(true)
@@ -138,31 +126,24 @@ pub fn start(port: Option<u16>, mode: Option<&str>, quiet: bool) -> Result<()> {
         .try_clone()
         .context("failed to clone log file handle")?;
 
-    // Determine the runtime package version to match this CLI version
-    let version = env!("CARGO_PKG_VERSION");
-    let runtime_package = format!("@shift-preflight/runtime@{}", version);
+    // Spawn ourselves with --foreground to run the native Rust proxy.
+    // No Node.js / npx required — single binary, zero dependencies.
+    let self_exe = std::env::current_exe().context("failed to determine shift-ai binary path")?;
 
-    let child = Command::new("npx")
+    let child = Command::new(&self_exe)
         .args([
-            &runtime_package,
             "proxy",
+            "start",
+            "--foreground",
             "--port",
             &port.to_string(),
             "--mode",
             mode,
+            "--quiet",
         ])
         .stdout(log_handle)
         .stderr(err_handle)
         .stdin(Stdio::null())
-        .env_clear()
-        .env("PATH", std::env::var("PATH").unwrap_or_default())
-        .env("HOME", std::env::var("HOME").unwrap_or_default())
-        .env("SHELL", std::env::var("SHELL").unwrap_or_default())
-        .env("TMPDIR", std::env::var("TMPDIR").unwrap_or_default())
-        .env(
-            "npm_config_registry",
-            std::env::var("npm_config_registry").unwrap_or_default(),
-        )
         .spawn()
         .context("failed to spawn proxy process")?;
 
@@ -275,4 +256,26 @@ pub fn ensure(port: Option<u16>, mode: Option<&str>, quiet: bool) -> Result<()> 
     }
 
     start(Some(port), mode, quiet)
+}
+
+/// Run the proxy server in the foreground (blocking).
+/// Used by `shift-ai proxy start --foreground` and LaunchAgent/systemd.
+pub fn run_foreground(port: u16, mode: &str) -> Result<()> {
+    let drive_mode: shift_preflight::DriveMode =
+        mode.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+
+    let config = shift_proxy::ProxyConfig {
+        port,
+        mode: drive_mode,
+        verbose: false,
+        providers: shift_proxy::state::ProviderUrls::default(),
+    };
+
+    // Build a tokio runtime and run the proxy server.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("failed to build tokio runtime")?;
+
+    rt.block_on(shift_proxy::start_server(config))
 }
