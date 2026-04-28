@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/alohaninja/shift/compare/v0.9.0...v0.9.1) (2026-04-28)
+
+
+### Bug Fixes
+
+* bump shift-proxy dependency to 0.9.0 in shift-cli ([#36](https://github.com/alohaninja/shift/issues/36)) ([25c3525](https://github.com/alohaninja/shift/commit/25c35250d1982bbed66dace539394c9b4ac4bbc6))
+
 ## [0.9.0](https://github.com/alohaninja/shift/compare/v0.8.0...v0.9.0) (2026-04-28)
 
 
