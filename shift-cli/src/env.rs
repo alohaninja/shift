@@ -1,117 +1,117 @@
-//! Agent environment variable generation.
+//! Agent configuration output.
 //!
-//! Each AI coding agent uses a different env var to override the API base URL.
-//! This module outputs the correct shell commands for each agent so that
-//! `eval "$(shift-ai env <agent>)"` in a shell profile is all that's needed.
+//! Each AI coding agent uses a different mechanism to override the API base URL.
+//! This module outputs the correct configuration for each agent:
+//!   - Shell env vars (Claude Code, OpenCode)
+//!   - TOML config snippets (Codex CLI)
+//!   - Manual instructions (Cursor)
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 const DEFAULT_PORT: u16 = 8787;
 
-/// Agent-specific environment variable configuration.
-struct AgentEnv {
-    /// Human-readable agent name
-    name: &'static str,
-    /// Environment variable to set
-    env_var: &'static str,
-    /// Base URL value (with or without /v1 suffix depending on agent)
-    url: String,
-    /// Short description for comments
-    description: &'static str,
-}
+/// Print configuration for a single agent.
+pub fn print_env(agent: &str, port: Option<u16>) -> Result<()> {
+    let port = port.unwrap_or(DEFAULT_PORT);
 
-fn agent_config(agent: &str, port: u16) -> Result<AgentEnv> {
     match agent {
-        "opencode" => Ok(AgentEnv {
-            name: "OpenCode",
-            env_var: "ANTHROPIC_BASE_URL",
-            // OpenCode requires /v1 suffix — without it, requests go to /messages instead of /v1/messages
-            url: format!("http://localhost:{}/v1", port),
-            description: "OpenCode (requires /v1 suffix)",
-        }),
-        "claude" | "claude-code" => Ok(AgentEnv {
-            name: "Claude Code",
-            env_var: "ANTHROPIC_BASE_URL",
-            url: format!("http://localhost:{}", port),
-            description: "Claude Code",
-        }),
-        "codex" | "openai" => Ok(AgentEnv {
-            name: "Codex CLI / OpenAI",
-            env_var: "OPENAI_BASE_URL",
-            url: format!("http://localhost:{}", port),
-            description: "Codex CLI / OpenAI agents",
-        }),
-        "gemini" => Ok(AgentEnv {
-            name: "Gemini CLI",
-            env_var: "GEMINI_API_BASE",
-            url: format!("http://localhost:{}", port),
-            description: "Gemini CLI",
-        }),
-        "cursor" => Ok(AgentEnv {
-            name: "Cursor",
-            env_var: "OPENAI_BASE_URL",
-            url: format!("http://localhost:{}", port),
-            description: "Cursor AI",
-        }),
+        "opencode" => {
+            println!("# SHIFT proxy — OpenCode");
+            println!("# OpenCode requires the /v1 suffix in the base URL.");
+            println!("# Recommended: use the @shift-preflight/opencode-plugin instead.");
+            println!("# If configuring manually, add to ~/.config/opencode/opencode.json:");
+            println!("#   \"provider\": {{ \"anthropic\": {{ \"options\": {{ \"baseURL\": \"http://localhost:{}/v1\" }} }} }}", port);
+        }
+        "claude" | "claude-code" => {
+            println!("# SHIFT proxy — Claude Code");
+            println!("# Add to your shell profile (~/.zshrc, ~/.bashrc):");
+            println!("export ANTHROPIC_BASE_URL=\"http://localhost:{}\"", port);
+            println!();
+            println!("# Or add to ~/.claude/settings.json:");
+            println!(
+                "# {{ \"env\": {{ \"ANTHROPIC_BASE_URL\": \"http://localhost:{}\" }} }}",
+                port
+            );
+        }
+        "codex" => {
+            println!("# SHIFT proxy — Codex CLI");
+            println!("# Codex CLI uses ~/.codex/config.toml (NOT environment variables).");
+            println!("# Add the following line to ~/.codex/config.toml:");
+            println!();
+            println!("openai_base_url = \"http://localhost:{}\"", port);
+            println!();
+            println!("# Or pass as a one-off flag:");
+            println!("# codex -c 'openai_base_url=\"http://localhost:{}\"'", port);
+        }
+        "cursor" => {
+            println!("# SHIFT proxy — Cursor");
+            println!("# Cursor requires manual configuration through its settings UI.");
+            println!("# 1. Open Cursor Settings > Models");
+            println!("# 2. Enter your own OpenAI API key");
+            println!("# 3. Set \"Override OpenAI Base URL\" to:");
+            println!("#    http://localhost:{}/v1", port);
+            println!(
+                "# Note: This only works with your own API key, not Cursor's built-in models."
+            );
+        }
         _ => anyhow::bail!(
-            "unknown agent '{}'. Supported: opencode, claude-code, codex, gemini, cursor",
+            "unknown agent '{}'. Supported: opencode, claude-code, codex, cursor",
             agent
         ),
     }
-}
-
-/// Print the env export command for a single agent.
-pub fn print_env(agent: &str, port: Option<u16>) -> Result<()> {
-    let port = port.unwrap_or(DEFAULT_PORT);
-    let config = agent_config(agent, port)?;
-
-    println!("# SHIFT proxy — {} ({})", config.description, config.name);
-    println!("export {}=\"{}\"", config.env_var, config.url);
 
     Ok(())
 }
 
-/// Print env export commands for all supported agents.
+/// Print configuration for all supported agents.
 pub fn print_env_all(port: Option<u16>) -> Result<()> {
     let port = port.unwrap_or(DEFAULT_PORT);
-    let agents = ["opencode", "claude-code", "codex", "gemini", "cursor"];
 
-    println!("# SHIFT proxy — environment variables for all supported agents");
-    println!("# Add to your shell profile (~/.zshrc, ~/.bashrc, etc.):");
-    println!("#   eval \"$(shift-ai env --all)\"");
+    println!("# SHIFT proxy — configuration for all supported agents");
+    println!("# Only Claude Code uses shell env vars. Other agents need");
+    println!("# config files or UI settings. Run `shift-ai setup` for");
+    println!("# automatic configuration of all detected agents.");
     println!();
-
-    for agent in &agents {
-        let config = agent_config(agent, port)?;
-        println!("# {}", config.description);
-        println!("export {}=\"{}\"", config.env_var, config.url);
-        println!();
-    }
+    println!("# Claude Code (env var — add to shell profile)");
+    println!("export ANTHROPIC_BASE_URL=\"http://localhost:{}\"", port);
+    println!();
+    println!("# Codex CLI — add to ~/.codex/config.toml:");
+    println!("# openai_base_url = \"http://localhost:{}\"", port);
+    println!();
+    println!("# OpenCode — use @shift-preflight/opencode-plugin (recommended)");
+    println!("# Cursor — set in Settings > Models > Override OpenAI Base URL");
 
     Ok(())
 }
 
-/// Print a table of all supported agents and their env vars (for --list).
+/// Print a table of all supported agents and their configuration methods.
 pub fn print_agent_list(port: Option<u16>) -> Result<()> {
     let port = port.unwrap_or(DEFAULT_PORT);
-    let agents = [
-        ("opencode", "OpenCode"),
-        ("claude-code", "Claude Code"),
-        ("codex", "Codex CLI"),
-        ("gemini", "Gemini CLI"),
-        ("cursor", "Cursor"),
-    ];
 
-    println!("{:<15} {:<25} {}", "Agent", "Env Var", "Base URL");
-    println!("{}", "─".repeat(70));
+    let base = format!("http://localhost:{}", port);
+    let base_v1 = format!("http://localhost:{}/v1", port);
+    let codex_val = format!("openai_base_url = \"{}\"", base);
 
-    for (key, name) in &agents {
-        let config = agent_config(key, port).context("agent config failed")?;
-        println!("{:<15} {:<25} {}", name, config.env_var, config.url);
-    }
-
+    println!("Agent           Method                    Configuration");
+    let sep = "─".repeat(75);
+    println!("{sep}");
+    println!(
+        "{:<16}{:<26}{base}",
+        "Claude Code", "ANTHROPIC_BASE_URL env"
+    );
+    println!(
+        "{:<16}{:<26}{codex_val}",
+        "Codex CLI", "~/.codex/config.toml"
+    );
+    println!(
+        "{:<16}{:<26}{base_v1}",
+        "OpenCode", "opencode-plugin (auto)"
+    );
+    println!("{:<16}{:<26}{base_v1}", "Cursor", "Settings UI (manual)");
     println!();
-    println!("Usage: eval \"$(shift-ai env <agent>)\"");
+    println!("Claude Code:  eval \"$(shift-ai env claude-code)\"");
+    println!("Codex CLI:    shift-ai env codex  (prints TOML snippet)");
+    println!("All agents:   shift-ai setup      (interactive, recommended)");
 
     Ok(())
 }

@@ -12,59 +12,54 @@ Run the interactive setup:
 shift-ai setup
 ```
 
-This detects Codex CLI and configures everything automatically.
+This detects Codex CLI and writes `openai_base_url` to `~/.codex/config.toml`
+automatically.
 
 ## Manual Setup
 
-### Option A: Shell Profile (Simplest)
+### Option A: config.toml (Recommended)
 
-Add to your `~/.zshrc` or `~/.bashrc`:
+Add to `~/.codex/config.toml`:
 
-```bash
-# Start SHIFT proxy if not running, set Codex base URL
-eval "$(shift-ai env codex)"
+```toml
+openai_base_url = "http://localhost:8787"
 ```
 
-Open a new terminal, then:
+Then start the proxy:
 
 ```bash
 shift-ai proxy start
-codex  # Now routes through SHIFT
 ```
 
-### Option B: Per-Session Wrapper
+> **Note:** Codex CLI uses its own TOML config — it does **not** read the
+> `OPENAI_BASE_URL` environment variable.
 
-Run Codex with the SHIFT proxy in a single command:
+### Option B: CLI Flag (Per-Session)
 
 ```bash
-shift-ai proxy ensure --quiet && OPENAI_BASE_URL=http://localhost:8787 codex
+shift-ai proxy ensure --quiet
+codex -c 'openai_base_url="http://localhost:8787"'
 ```
 
-Or create a shell alias:
+### Option C: Custom Model Provider
 
-```bash
-alias codex-shift='shift-ai proxy ensure --quiet && OPENAI_BASE_URL=http://localhost:8787 codex'
-```
+For more control, define a custom provider in `~/.codex/config.toml`:
 
-### Option C: LaunchAgent (Always-On)
+```toml
+model = "gpt-4.1"
+model_provider = "shift-proxy"
 
-Install a macOS LaunchAgent so the proxy starts on login:
-
-```bash
-shift-ai setup
-```
-
-Then just set the env var in your shell profile:
-
-```bash
-eval "$(shift-ai env codex)"
+[model_providers.shift-proxy]
+name = "OpenAI via SHIFT proxy"
+base_url = "http://localhost:8787"
+requires_openai_auth = true
 ```
 
 ## How It Works
 
 ```
 Codex CLI
-  → OPENAI_BASE_URL=http://localhost:8787
+  → openai_base_url = http://localhost:8787
     → SHIFT Proxy (inspects + optimizes images)
       → https://api.openai.com/v1/chat/completions
 ```
@@ -89,5 +84,5 @@ The proxy on port 8787 is shared across all agents. If you also use Claude Code
 or OpenCode, they can all use the same proxy instance:
 
 ```bash
-shift-ai env --list   # Show env vars for all agents
+shift-ai env --list   # Show configuration for all agents
 ```

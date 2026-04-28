@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SHIFT — Codex CLI integration installer
 #
+# Writes openai_base_url to ~/.codex/config.toml so Codex CLI routes
+# API requests through the SHIFT proxy.
+#
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/alohaninja/shift/main/codex-plugin/install.sh | bash
 #   # or
@@ -8,7 +11,7 @@
 set -euo pipefail
 
 PORT=8787
-SHELL_RC=""
+CODEX_CONFIG="${HOME}/.codex/config.toml"
 
 echo "SHIFT — Codex CLI Integration"
 echo "=============================="
@@ -26,31 +29,22 @@ fi
 echo "✓ shift-ai $(shift-ai --version 2>/dev/null | head -1 || echo 'found')"
 
 if ! command -v codex &>/dev/null; then
-  echo "⚠ codex not found on PATH (will still configure env var)"
+  echo "⚠ codex not found on PATH (will still configure config.toml)"
 fi
 echo
 
-# Detect shell profile
-if [ -n "${ZSH_VERSION:-}" ] || [ "${SHELL:-}" = "$(command -v zsh)" ]; then
-  SHELL_RC="${HOME}/.zshrc"
-elif [ -n "${BASH_VERSION:-}" ] || [ "${SHELL:-}" = "$(command -v bash)" ]; then
-  SHELL_RC="${HOME}/.bashrc"
-else
-  SHELL_RC="${HOME}/.profile"
-fi
+# Configure ~/.codex/config.toml
+mkdir -p "${HOME}/.codex"
 
-# Check if already configured
-MARKER='shift-ai env codex'
-if grep -q "${MARKER}" "${SHELL_RC}" 2>/dev/null; then
-  echo "✓ Already configured in ${SHELL_RC}"
+KEY="openai_base_url"
+VALUE="http://localhost:${PORT}"
+
+if [ -f "${CODEX_CONFIG}" ] && grep -q "${KEY}" "${CODEX_CONFIG}" 2>/dev/null; then
+  echo "✓ ${KEY} already set in ${CODEX_CONFIG}"
 else
-  echo "Adding SHIFT env to ${SHELL_RC}..."
-  {
-    echo
-    echo '# SHIFT — Codex CLI image optimization proxy'
-    echo 'eval "$(shift-ai env codex)"'
-  } >> "${SHELL_RC}"
-  echo "✓ Added to ${SHELL_RC}"
+  echo "Adding ${KEY} to ${CODEX_CONFIG}..."
+  echo "${KEY} = \"${VALUE}\"" >> "${CODEX_CONFIG}"
+  echo "✓ Configured"
 fi
 
 # Start proxy
@@ -59,5 +53,5 @@ echo "Starting SHIFT proxy..."
 shift-ai proxy ensure --quiet && echo "✓ Proxy running on port ${PORT}" || echo "✗ Failed to start proxy"
 
 echo
-echo "Done! Open a new terminal for changes to take effect."
+echo "Done! Codex CLI will now route API traffic through SHIFT."
 echo "Run 'shift-ai gain' to see cumulative token savings."

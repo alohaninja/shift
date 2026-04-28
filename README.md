@@ -168,29 +168,27 @@ shift-ai setup
 This detects installed agents, configures each one, and optionally installs a
 macOS LaunchAgent to keep the proxy running.
 
-| Agent | Integration | Setup |
-|-------|------------|-------|
-| **Any agent** | [Interactive setup](#setup) | `shift-ai setup` |
-| [OpenCode](https://opencode.ai) | [Plugin](opencode-plugin/) | `"plugin": ["@shift-preflight/opencode-plugin"]` + provider `baseURL` |
-| [Claude Code](https://claude.ai/code) | [Settings + proxy](claude-code-hook/) | `shift-ai setup` or `eval "$(shift-ai env claude-code)"` |
-| [Codex CLI](https://github.com/openai/codex) | [Env var + proxy](codex-plugin/) | `shift-ai setup` or `eval "$(shift-ai env codex)"` |
-| Gemini CLI | Env var + proxy | `eval "$(shift-ai env gemini)"` |
-| Cursor | Env var + proxy | `eval "$(shift-ai env cursor)"` |
-| AI SDK apps | Middleware | `wrapLanguageModel({ middleware: shiftMiddleware() })` |
+| Agent | Method | Setup |
+|-------|--------|-------|
+| **Any agent** | [Interactive setup](#setup) | `shift-ai setup` (auto-detects + configures) |
+| [OpenCode](https://opencode.ai) | [Plugin](opencode-plugin/) (auto) | Plugin auto-starts proxy and sets `baseURL` |
+| [Claude Code](https://claude.ai/code) | [`settings.json`](claude-code-hook/) | Writes `ANTHROPIC_BASE_URL` to `~/.claude/settings.json` |
+| [Codex CLI](https://github.com/openai/codex) | [`config.toml`](codex-plugin/) | Writes `openai_base_url` to `~/.codex/config.toml` |
+| Cursor | Settings UI (manual) | Paste URL into Settings > Models > Override OpenAI Base URL |
+| AI SDK apps | Middleware (in-process) | `wrapLanguageModel({ middleware: shiftMiddleware() })` |
+
+> **Gemini CLI** does not support API base URL overrides and is not currently supported.
 
 ### Quick per-agent setup
 
 ```bash
-# Claude Code
-eval "$(shift-ai env claude-code)"    # Add to ~/.zshrc
+# Claude Code — env var (add to ~/.zshrc)
+eval "$(shift-ai env claude-code)"
 
-# Codex CLI
-eval "$(shift-ai env codex)"          # Add to ~/.zshrc
+# Codex CLI — prints TOML snippet for ~/.codex/config.toml
+shift-ai env codex
 
-# All agents at once
-eval "$(shift-ai env --all)"          # Add to ~/.zshrc
-
-# List supported agents
+# List all agents and their config methods
 shift-ai env --list
 ```
 
@@ -304,9 +302,9 @@ Commands:
   shift-ai proxy stop           Stop the proxy daemon
   shift-ai proxy status         Show proxy status
   shift-ai proxy ensure         Start if needed, no-op if healthy
-  shift-ai env <agent>          Output env vars for an agent
-  shift-ai env --list           List all supported agents
-  shift-ai env --all            Output env vars for all agents
+  shift-ai env <agent>          Output config for an agent
+  shift-ai env --list           List all supported agents and methods
+  shift-ai env --all            Output config for all agents
   shift-ai setup                Interactive multi-agent setup
 ```
 

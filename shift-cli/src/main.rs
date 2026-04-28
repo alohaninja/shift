@@ -122,14 +122,14 @@ enum Commands {
         action: ProxyAction,
     },
 
-    /// Output shell environment variables for an AI agent
+    /// Output configuration for an AI agent
     ///
-    /// Prints export commands that configure the specified agent to route
-    /// API traffic through the SHIFT proxy. Add to your shell profile:
+    /// Prints the correct config for each agent (env vars, TOML snippets,
+    /// or manual instructions). For Claude Code, add to your shell profile:
     ///
     ///   eval "$(shift-ai env claude-code)"
     Env {
-        /// Agent name: opencode, claude-code, codex, gemini, cursor
+        /// Agent name: opencode, claude-code, codex, cursor
         agent: Option<String>,
 
         /// Proxy port

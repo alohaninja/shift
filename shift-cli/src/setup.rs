@@ -3,6 +3,12 @@
 //! Detects which AI coding agents are installed and configures each one
 //! to route API traffic through the SHIFT proxy. Also optionally installs
 //! a macOS LaunchAgent for auto-start on login.
+//!
+//! Supported agents and their configuration mechanisms:
+//!   - OpenCode:    writes opencode.json (plugin + provider.baseURL)
+//!   - Claude Code: writes ~/.claude/settings.json (env.ANTHROPIC_BASE_URL)
+//!   - Codex CLI:   writes ~/.codex/config.toml (openai_base_url)
+//!   - Cursor:      prints manual instructions (UI-only setting)
 
 use anyhow::{Context, Result};
 use std::fs;
@@ -63,13 +69,7 @@ fn detect_agents() -> Vec<DetectedAgent> {
         DetectedAgent {
             name: "Codex CLI",
             key: "codex",
-            detected: command_exists("codex"),
-            configured: false,
-        },
-        DetectedAgent {
-            name: "Gemini CLI",
-            key: "gemini",
-            detected: command_exists("gemini"),
+            detected: command_exists("codex") || dir_exists("~/.codex"),
             configured: false,
         },
         DetectedAgent {
@@ -88,7 +88,10 @@ fn check_prerequisites() -> Result<(bool, bool)> {
     Ok((shift_ok, npx_ok))
 }
 
+// ── macOS LaunchAgent ────────────────────────────────────────────────
+
 /// Generate the macOS LaunchAgent plist content.
+#[cfg(target_os = "macos")]
 fn launchagent_plist(shift_ai_path: &str, port: u16) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -124,7 +127,8 @@ fn launchagent_plist(shift_ai_path: &str, port: u16) -> String {
 }
 
 /// Install the macOS LaunchAgent.
-pub fn install_launchagent(port: u16) -> Result<()> {
+#[cfg(target_os = "macos")]
+fn install_launchagent(port: u16) -> Result<()> {
     let home = std::env::var("HOME").context("HOME not set")?;
     let agents_dir = PathBuf::from(&home).join("Library/LaunchAgents");
     fs::create_dir_all(&agents_dir).context("failed to create LaunchAgents directory")?;
@@ -160,23 +164,7 @@ pub fn install_launchagent(port: u16) -> Result<()> {
     Ok(())
 }
 
-/// Uninstall the macOS LaunchAgent.
-#[allow(dead_code)]
-pub fn uninstall_launchagent() -> Result<()> {
-    let home = std::env::var("HOME").context("HOME not set")?;
-    let plist_path = PathBuf::from(&home)
-        .join("Library/LaunchAgents")
-        .join(format!("{}.plist", LAUNCH_AGENT_LABEL));
-
-    if plist_path.exists() {
-        let _ = Command::new("launchctl")
-            .args(["unload", &plist_path.to_string_lossy()])
-            .output();
-        fs::remove_file(&plist_path).context("failed to remove LaunchAgent plist")?;
-    }
-
-    Ok(())
-}
+// ── Per-agent configuration ──────────────────────────────────────────
 
 /// Configure Claude Code by writing/updating ~/.claude/settings.json.
 fn configure_claude_code(port: u16) -> Result<bool> {
@@ -266,6 +254,49 @@ fn configure_opencode(port: u16) -> Result<bool> {
     Ok(true)
 }
 
+/// Configure Codex CLI by writing/updating ~/.codex/config.toml.
+fn configure_codex(port: u16) -> Result<bool> {
+    let home = std::env::var("HOME").context("HOME not set")?;
+    let config_dir = PathBuf::from(&home).join(".codex");
+    fs::create_dir_all(&config_dir)?;
+
+    let config_path = config_dir.join("config.toml");
+    let key = "openai_base_url";
+    let value = format!("http://localhost:{}", port);
+
+    if config_path.exists() {
+        let content = fs::read_to_string(&config_path)?;
+        // Check if already set
+        if content.contains(key) {
+            // Replace existing line
+            let mut new_lines = Vec::new();
+            for line in content.lines() {
+                if line.trim_start().starts_with(key) {
+                    new_lines.push(format!("{} = \"{}\"", key, value));
+                } else {
+                    new_lines.push(line.to_string());
+                }
+            }
+            fs::write(&config_path, new_lines.join("\n") + "\n")?;
+        } else {
+            // Append
+            let mut content = content;
+            if !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(&format!("{} = \"{}\"\n", key, value));
+            fs::write(&config_path, content)?;
+        }
+    } else {
+        // Create new config
+        fs::write(&config_path, format!("{} = \"{}\"\n", key, value))?;
+    }
+
+    Ok(true)
+}
+
+// ── Interactive setup ────────────────────────────────────────────────
+
 /// Run the interactive setup.
 pub fn run_setup() -> Result<()> {
     use colored::Colorize;
@@ -328,7 +359,7 @@ pub fn run_setup() -> Result<()> {
         println!("No AI agents detected. You can still start the proxy manually:");
         println!("  shift-ai proxy start");
         println!();
-        println!("Then configure your agent's base URL:");
+        println!("Then configure your agent:");
         println!("  shift-ai env --list");
         return Ok(());
     }
@@ -356,10 +387,8 @@ pub fn run_setup() -> Result<()> {
         let result = match agent.key {
             "opencode" => configure_opencode(port),
             "claude-code" => configure_claude_code(port),
-            "codex" | "gemini" | "cursor" => {
-                // These agents use env vars — print instructions
-                Ok(false)
-            }
+            "codex" => configure_codex(port),
+            "cursor" => Ok(false), // UI-only, handled below
             _ => Ok(false),
         };
 
@@ -368,10 +397,17 @@ pub fn run_setup() -> Result<()> {
                 agent.configured = true;
                 println!("  {} {} configured", "✓".green(), agent.name);
             }
-            Ok(false) => {
-                // Env-var based agents — need shell profile
+            Ok(false) if agent.key == "cursor" => {
                 println!(
-                    "  {} {} — add to shell profile: eval \"$(shift-ai env {})\"",
+                    "  {} {} — open Settings > Models > Override OpenAI Base URL:",
+                    "→".yellow(),
+                    agent.name,
+                );
+                println!("         http://localhost:{}/v1", port);
+            }
+            Ok(false) => {
+                println!(
+                    "  {} {} — run: shift-ai env {}",
                     "→".yellow(),
                     agent.name,
                     agent.key
@@ -417,8 +453,6 @@ pub fn run_setup() -> Result<()> {
     }
     println!("All API traffic now flows through SHIFT.");
     println!("Run `shift-ai gain` to see cumulative token savings.");
-    println!();
-    println!("Note: Shell profile changes require opening a new terminal.");
 
     Ok(())
 }
