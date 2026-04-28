@@ -16,9 +16,50 @@
  * without the CLI installed.
  */
 
-import { appendFile, lstat, mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+// Node-specific modules are loaded lazily via loadNodeDeps() so that
+// importing this module in non-Node environments (e.g., bundled plugins,
+// edge runtimes, Bun without node compat) doesn't crash at load time.
+// The types, buildRunRecord(), and session accumulator are all pure JS
+// and work everywhere — only recordRun()'s file write needs Node APIs.
+
+interface NodeDeps {
+  appendFile: typeof import("node:fs/promises").appendFile;
+  lstat: typeof import("node:fs/promises").lstat;
+  mkdir: typeof import("node:fs/promises").mkdir;
+  homedir: typeof import("node:os").homedir;
+  dirname: typeof import("node:path").dirname;
+  join: typeof import("node:path").join;
+}
+
+let _nodeDeps: NodeDeps | null | undefined; // undefined = not yet loaded
+
+async function loadNodeDeps(): Promise<NodeDeps | null> {
+  if (_nodeDeps !== undefined) return _nodeDeps;
+  try {
+    const [fs, os, path] = await Promise.all([
+      import("node:fs/promises"),
+      import("node:os"),
+      import("node:path"),
+    ]);
+    _nodeDeps = {
+      appendFile: fs.appendFile,
+      lstat: fs.lstat,
+      mkdir: fs.mkdir,
+      homedir: os.homedir,
+      dirname: path.dirname,
+      join: path.join,
+    };
+  } catch {
+    // Not in a Node-compatible environment — file writes will no-op
+    _nodeDeps = null;
+  }
+  return _nodeDeps;
+}
+
+/** @internal — reset for testing */
+export function _resetNodeDeps(): void {
+  _nodeDeps = undefined;
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Types — mirrors the Rust RunRecord in shift-core/src/stats.rs
@@ -136,9 +177,19 @@ function accumulateSession(record: RunRecord): void {
 // File writer
 // ────────────────────────────────────────────────────────────────────
 
-/** Default stats file path: ~/.shift/stats.jsonl */
-export function defaultStatsPath(): string {
-  return join(homedir(), ".shift", "stats.jsonl");
+/**
+ * Default stats file path: ~/.shift/stats.jsonl
+ *
+ * Returns the cached path if Node deps have already been loaded,
+ * otherwise triggers a synchronous load. Returns empty string in
+ * non-Node environments. The main code path in recordRun() constructs
+ * the path internally via lazy deps — this function exists primarily
+ * for external callers and tests.
+ */
+export async function defaultStatsPath(): Promise<string> {
+  const deps = await loadNodeDeps();
+  if (!deps) return "";
+  return deps.join(deps.homedir(), ".shift", "stats.jsonl");
 }
 
 /**
@@ -163,18 +214,22 @@ export async function recordRun(
   record: RunRecord,
   statsPath?: string,
 ): Promise<void> {
-  // Always accumulate in-memory session stats
+  // Always accumulate in-memory session stats (works in any environment)
   accumulateSession(record);
 
-  const filePath = statsPath ?? defaultStatsPath();
+  // Load Node APIs lazily — no-op in non-Node environments
+  const deps = await loadNodeDeps();
+  if (!deps) return; // silently skip file write in non-Node environments
+
+  const filePath = statsPath ?? deps.join(deps.homedir(), ".shift", "stats.jsonl");
   try {
     // Ensure parent directory exists
-    const dir = dirname(filePath);
-    await mkdir(dir, { recursive: true });
+    const dir = deps.dirname(filePath);
+    await deps.mkdir(dir, { recursive: true });
 
     // Reject symlinks (defense-in-depth, matching Rust's O_NOFOLLOW)
     try {
-      const stat = await lstat(filePath);
+      const stat = await deps.lstat(filePath);
       if (stat.isSymbolicLink()) {
         console.warn(
           `[shift-runtime] Refusing to write stats: ${filePath} is a symlink`,
@@ -186,7 +241,7 @@ export async function recordRun(
     }
 
     const line = JSON.stringify(record) + "\n";
-    await appendFile(filePath, line, { mode: 0o600 });
+    await deps.appendFile(filePath, line, { mode: 0o600 });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.warn(`[shift-runtime] Failed to write stats: ${msg}`);
