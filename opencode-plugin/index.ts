@@ -1,8 +1,17 @@
 import type { Plugin } from "@opencode-ai/plugin";
+import { version as PACKAGE_VERSION } from "./package.json";
 
 const DEFAULT_PORT = 8787;
 const PROBE_TIMEOUT_MS = 2_000;
 const HEALTH_SERVICE_ID = "@shift-preflight/runtime proxy";
+
+/** Result of probing the running proxy's health endpoint. */
+interface ProxyProbeResult {
+  /** Whether the proxy is running and healthy. */
+  healthy: boolean;
+  /** The runtime version reported by the proxy, if available. */
+  version?: string;
+}
 
 /**
  * OpenCode plugin that auto-starts the SHIFT preflight proxy.
@@ -40,10 +49,9 @@ const HEALTH_SERVICE_ID = "@shift-preflight/runtime proxy";
  * On startup, the plugin:
  * 1. Checks if `shift-ai` is installed — silently skips if not.
  * 2. Probes `localhost:8787/health` — if the SHIFT proxy is already
- *    running, skips.
- * 3. Runs `shift-ai proxy ensure` to start the proxy if needed.
- *    The proxy listens on port 8787 and optimizes images in all
- *    requests before forwarding to the upstream API.
+ *    running **at the expected version**, skips.
+ * 3. If the proxy is running an older version, stops it first.
+ * 4. Runs `shift-ai proxy ensure` to start the proxy if needed.
  *
  * The proxy is shared across sessions. Other agents can also use it:
  * ```bash
@@ -63,9 +71,25 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
     return {};
   }
 
-  // Already running?
-  if (await isShiftProxyHealthy(port)) {
-    return {};
+  // Check if the SHIFT proxy is already running by probing the health endpoint.
+  const probe = await probeShiftProxy(port);
+
+  if (probe.healthy) {
+    // Proxy is running — check if it's the version we expect.
+    if (probe.version === PACKAGE_VERSION) {
+      return {};
+    }
+
+    // Version mismatch — stop the old proxy so we can start the new one.
+    const old = probe.version ?? "unknown";
+    console.log(
+      `[shift] proxy version mismatch: running ${old}, expected ${PACKAGE_VERSION} — restarting`,
+    );
+    try {
+      await $`shift-ai proxy stop --quiet`.quiet();
+    } catch {
+      // Best-effort — proxy ensure will handle port conflicts
+    }
   }
 
   // Use `shift-ai proxy ensure` — handles daemon lifecycle, PID files,
@@ -73,8 +97,11 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
   try {
     await $`shift-ai proxy ensure --quiet`.quiet();
 
-    if (await isShiftProxyHealthy(port)) {
-      console.log(`[shift] proxy started on port ${port}`);
+    const postProbe = await probeShiftProxy(port);
+    if (postProbe.healthy) {
+      console.log(
+        `[shift] proxy v${PACKAGE_VERSION} started on port ${port}`,
+      );
     } else {
       console.warn(
         `[shift] proxy ensure completed but not yet responding on port ${port}`,
@@ -92,19 +119,22 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
 
 /**
  * Probe the SHIFT proxy health endpoint and verify its identity.
- * Returns true only if the response matches the expected service ID,
- * preventing port-squatting by unrelated processes.
+ * Returns both health status and the version reported by the proxy.
  */
-async function isShiftProxyHealthy(port: number): Promise<boolean> {
+async function probeShiftProxy(port: number): Promise<ProxyProbeResult> {
   try {
     const res = await fetch(`http://localhost:${port}/health`, {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    if (!res.ok) return false;
-    const body = (await res.json()) as { service?: string };
-    return body?.service === HEALTH_SERVICE_ID;
+    if (!res.ok) return { healthy: false };
+    const body = (await res.json()) as {
+      service?: string;
+      version?: string;
+    };
+    if (body?.service !== HEALTH_SERVICE_ID) return { healthy: false };
+    return { healthy: true, version: body.version };
   } catch {
-    return false;
+    return { healthy: false };
   }
 }
 

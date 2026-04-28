@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.0](https://github.com/alohaninja/shift/compare/v0.7.1...v0.8.0) (2026-04-28)
+
+
+### Features
+
+* **opencode-plugin:** version-aware proxy restart on plugin update ([#33](https://github.com/alohaninja/shift/issues/33)) ([0e1069e](https://github.com/alohaninja/shift/commit/0e1069e98fd9c29ec6a69f1fc129bd9ee021ec56))
+
+## [0.7.1](https://github.com/alohaninja/shift/compare/v0.7.0...v0.7.1) (2026-04-28)
+
+
+### Bug Fixes
+
+* **runtime:** lazy-load Node APIs in stats module to prevent import crash ([#30](https://github.com/alohaninja/shift/issues/30)) ([b1557aa](https://github.com/alohaninja/shift/commit/b1557aaaaf5999da0f921431ea90610cc545a594))
+
+## [0.7.0](https://github.com/alohaninja/shift/compare/v0.6.2...v0.7.0) (2026-04-28)
+
+
+### Features
+
+* **runtime:** record proxy stats to ~/.shift/stats.jsonl ([#27](https://github.com/alohaninja/shift/issues/27)) ([02e0936](https://github.com/alohaninja/shift/commit/02e0936147ca3ebe553b5400ef834f4adbb3dd59))
+
 ## [0.6.2](https://github.com/alohaninja/shift/compare/v0.6.1...v0.6.2) (2026-04-28)
 
 

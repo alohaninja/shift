@@ -1,4 +1,5 @@
 import { defineConfig } from "tsup";
+import pkg from "./package.json";
 
 export default defineConfig({
   entry: {
@@ -14,4 +15,7 @@ export default defineConfig({
   target: "node18",
   splitting: true,
   treeshake: true,
+  define: {
+    __RUNTIME_VERSION__: JSON.stringify(pkg.version),
+  },
 });
