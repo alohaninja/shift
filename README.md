@@ -16,7 +16,8 @@
   <a href="https://github.com/alohaninja/shift/actions"><img src="https://github.com/alohaninja/shift/workflows/CI/badge.svg" alt="CI"></a>
   <a href="https://github.com/alohaninja/shift/releases"><img src="https://img.shields.io/github/v/release/alohaninja/shift" alt="Release"></a>
   <a href="https://crates.io/crates/shift-preflight-cli"><img src="https://img.shields.io/crates/v/shift-preflight-cli" alt="crates.io"></a>
-  <a href="https://www.npmjs.com/package/@shift-preflight/runtime"><img src="https://img.shields.io/npm/v/@shift-preflight/runtime" alt="npm"></a>
+  <a href="https://www.npmjs.com/package/@shift-preflight/runtime"><img src="https://img.shields.io/npm/v/@shift-preflight/runtime?label=runtime" alt="npm runtime"></a>
+  <a href="https://www.npmjs.com/package/@shift-preflight/opencode-plugin"><img src="https://img.shields.io/npm/v/@shift-preflight/opencode-plugin?label=opencode-plugin" alt="npm opencode-plugin"></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
 </p>
 
