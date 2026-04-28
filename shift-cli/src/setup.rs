@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 const DEFAULT_PORT: u16 = 8787;
+#[cfg(target_os = "macos")]
 const LAUNCH_AGENT_LABEL: &str = "com.shift-ai.proxy";
 
 /// Detected agent information.
