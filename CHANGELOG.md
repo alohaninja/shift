@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/alohaninja/shift/compare/v0.6.0...v0.6.1) (2026-04-28)
+
+
+### Bug Fixes
+
+* **opencode-plugin:** clarify startup timing in README ([0aa5041](https://github.com/alohaninja/shift/commit/0aa5041ab1275059632700dd9547c05beafbe227))
+
 ## [0.6.0](https://github.com/alohaninja/shift/compare/v0.5.1...v0.6.0) (2026-04-28)
 
 
