@@ -13,6 +13,7 @@ export {
   getSessionStats,
   resetSessionStats,
   defaultStatsPath,
+  _resetNodeDeps,
 } from "./stats.js";
 export type {
   RunRecord,
