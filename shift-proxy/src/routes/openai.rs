@@ -3,8 +3,12 @@
 //! Intercepts OpenAI API requests, runs the SHIFT optimization pipeline
 //! on the payload, records stats with full per-image token savings, and
 //! forwards to the real OpenAI API.
+//!
+//! The CPU-intensive optimization runs on a blocking thread to avoid
+//! starving the tokio event loop.
 
 use crate::forward::forward_request;
+use crate::optimize::optimize_payload;
 use crate::ProxyState;
 use axum::extract::State;
 use axum::http::{HeaderMap, Uri};
@@ -22,10 +26,15 @@ pub async fn openai_handler(
     let query = uri.query().map(|q| format!("?{}", q)).unwrap_or_default();
     let target_url = format!("{}{}{}", base_url, uri.path(), query);
 
-    // Run SHIFT optimization pipeline
+    // Run SHIFT optimization pipeline on a blocking thread to avoid
+    // starving the async runtime during CPU-intensive image operations.
     let start = std::time::Instant::now();
-    let (final_body, optimized) = match optimize_payload(&body, &config) {
-        Some((transformed_json, report)) => {
+    let body_clone = body.clone();
+    let optimization_result =
+        tokio::task::spawn_blocking(move || optimize_payload(&body_clone, &config)).await;
+
+    let (final_body, optimized) = match optimization_result {
+        Ok(Some((transformed_json, report))) => {
             let duration_ms = start.elapsed().as_millis() as u64;
 
             // Record session stats (in-memory)
@@ -50,7 +59,7 @@ pub async fn openai_handler(
 
             (transformed_json, true)
         }
-        None => (body, false),
+        Ok(None) | Err(_) => (body, false),
     };
 
     if state.config.verbose && !optimized {
@@ -65,38 +74,4 @@ pub async fn openai_handler(
         Some(final_body),
     )
     .await
-}
-
-/// Run the SHIFT pipeline on a JSON payload (same logic as Anthropic route).
-fn optimize_payload(
-    body: &str,
-    config: &shift_preflight::ShiftConfig,
-) -> Option<(String, shift_preflight::Report)> {
-    let payload: serde_json::Value = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("failed to parse payload as JSON: {}", e);
-            return None;
-        }
-    };
-
-    let (result, report) = match shift_preflight::process(&payload, config) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!("SHIFT pipeline error: {}", e);
-            return None;
-        }
-    };
-
-    if !report.has_changes() {
-        return None;
-    }
-
-    match serde_json::to_string(&result) {
-        Ok(json) => Some((json, report)),
-        Err(e) => {
-            tracing::warn!("failed to serialize optimized payload: {}", e);
-            None
-        }
-    }
 }

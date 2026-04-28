@@ -1,18 +1,21 @@
 //! Catch-all passthrough handler.
 //!
-//! Forwards POST requests to the upstream provider detected from the
-//! request path. Used for routes not explicitly matched by the provider-
-//! specific handlers (e.g., OpenAI batch endpoints, Anthropic beta paths).
+//! Forwards requests to the upstream provider detected from the request
+//! path. Used for routes not explicitly matched by the provider-specific
+//! handlers (e.g., OpenAI batch endpoints, Anthropic beta paths, GET
+//! /v1/models, etc.).
 
 use crate::forward::forward_request;
 use crate::ProxyState;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 
-/// POST /* — detect provider from path and forward unchanged.
+/// Catch-all handler — detect provider from path and forward unchanged.
+/// Handles all HTTP methods (GET, POST, PUT, PATCH, DELETE).
 pub async fn passthrough_handler(
     State(state): State<ProxyState>,
+    method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: String,
@@ -39,15 +42,19 @@ pub async fn passthrough_handler(
     let target_url = format!("{}{}{}", base_url, path, query);
 
     if state.config.verbose {
-        tracing::info!("Passthrough: {} → {}{}", path, base_url, path);
+        tracing::info!("Passthrough: {} {} → {}{}", method, path, base_url, path);
     }
+
+    // For methods without a body (GET, HEAD), don't forward one.
+    let has_body = !matches!(method, Method::GET | Method::HEAD);
+    let body = if has_body { Some(body) } else { None };
 
     forward_request(
         &state.http_client,
-        "POST",
+        method.as_str(),
         &target_url,
         &headers,
-        Some(body),
+        body,
     )
     .await
 }

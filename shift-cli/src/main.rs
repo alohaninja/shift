@@ -171,6 +171,10 @@ enum ProxyAction {
         /// Run in foreground (for LaunchAgent / systemd)
         #[arg(long)]
         foreground: bool,
+
+        /// Enable verbose logging
+        #[arg(long, short)]
+        verbose: bool,
     },
 
     /// Stop the proxy daemon
@@ -265,11 +269,12 @@ fn run() -> Result<()> {
                     mode,
                     quiet,
                     foreground,
+                    verbose,
                 } => {
                     if *foreground {
                         // Run the native Rust proxy server in foreground (blocking).
                         // Used by daemon spawn and LaunchAgent/systemd.
-                        proxy::run_foreground(*port, mode.as_str())
+                        proxy::run_foreground(*port, mode.as_str(), *verbose)
                     } else {
                         proxy::start(Some(*port), Some(mode.as_str()), *quiet)
                     }

@@ -76,10 +76,10 @@ async fn stats_returns_session_stats() {
     assert!(json["tokenSavings"]["anthropic_before"].is_number());
 }
 
-// ── 404/405 for unknown GET routes ────────────────────────────────────
+// ── 404 for unknown GET routes ────────────────────────────────────────
 
 #[tokio::test]
-async fn unknown_get_returns_not_found_or_method_not_allowed() {
+async fn unknown_get_returns_not_found() {
     let app = create_app(test_config());
 
     let response = app
@@ -92,13 +92,9 @@ async fn unknown_get_returns_not_found_or_method_not_allowed() {
         .await
         .unwrap();
 
-    // GET to unknown path: 404 (no route) or 405 (fallback only handles POST)
-    let status = response.status();
-    assert!(
-        status == StatusCode::NOT_FOUND || status == StatusCode::METHOD_NOT_ALLOWED,
-        "expected 404 or 405, got {}",
-        status
-    );
+    // GET to unknown path hits the catch-all, which returns 404 because
+    // detect_provider_from_route returns None for "/unknown/endpoint".
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 // ── Anthropic route reachability ──────────────────────────────────────

@@ -16,6 +16,7 @@
 //! ```
 
 pub mod forward;
+pub mod optimize;
 pub mod routes;
 pub mod state;
 
@@ -33,6 +34,21 @@ pub fn create_app(config: ProxyConfig) -> Router {
 
 /// Start the proxy server, blocking until shutdown signal.
 pub async fn start_server(config: ProxyConfig) -> anyhow::Result<()> {
+    // Initialize tracing subscriber so that tracing::warn!/error!/info!
+    // calls in route handlers are actually visible on stderr.
+    let filter = if config.verbose {
+        "shift_proxy=debug,tower_http=debug"
+    } else {
+        "shift_proxy=warn"
+    };
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(filter)),
+        )
+        .with_target(false)
+        .init();
+
     let port = config.port;
     let verbose = config.verbose;
     let app = create_app(config);

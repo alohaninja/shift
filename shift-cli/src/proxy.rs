@@ -260,14 +260,14 @@ pub fn ensure(port: Option<u16>, mode: Option<&str>, quiet: bool) -> Result<()> 
 
 /// Run the proxy server in the foreground (blocking).
 /// Used by `shift-ai proxy start --foreground` and LaunchAgent/systemd.
-pub fn run_foreground(port: u16, mode: &str) -> Result<()> {
+pub fn run_foreground(port: u16, mode: &str, verbose: bool) -> Result<()> {
     let drive_mode: shift_preflight::DriveMode =
         mode.parse().map_err(|e: String| anyhow::anyhow!(e))?;
 
     let config = shift_proxy::ProxyConfig {
         port,
         mode: drive_mode,
-        verbose: false,
+        verbose,
         providers: shift_proxy::state::ProviderUrls::default(),
     };
 

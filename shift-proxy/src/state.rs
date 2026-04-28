@@ -70,7 +70,12 @@ pub struct ProxyState {
 impl ProxyState {
     pub fn new(config: ProxyConfig) -> Self {
         let http_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
+            // Use connect_timeout, not total timeout — streaming responses
+            // (SSE from Anthropic/OpenAI) can run for minutes.
+            .connect_timeout(std::time::Duration::from_secs(30))
+            // SECURITY: Do not follow redirects. Prevents SSRF via redirect
+            // to internal services (e.g., cloud metadata endpoints).
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("failed to build HTTP client");
 
@@ -119,6 +124,10 @@ impl SessionStats {
     }
 
     /// Record stats from a completed optimization run.
+    ///
+    /// Atomics use `Ordering::Relaxed` because these are independent counters
+    /// with no happens-before relationship — approximate consistency is fine
+    /// for diagnostic stats.
     pub fn record(&self, report: &shift_preflight::Report) {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
         self.total_images
@@ -128,12 +137,13 @@ impl SessionStats {
         let saved = report.original_size.saturating_sub(report.transformed_size) as u64;
         self.total_bytes_saved.fetch_add(saved, Ordering::Relaxed);
 
-        if let Ok(mut ts) = self.token_savings.lock() {
-            ts.openai_before += report.token_savings.openai_before;
-            ts.openai_after += report.token_savings.openai_after;
-            ts.anthropic_before += report.token_savings.anthropic_before;
-            ts.anthropic_after += report.token_savings.anthropic_after;
-        }
+        // Recover from mutex poisoning — the inner data (simple counters)
+        // has no invariants that could be violated by a panic.
+        let mut ts = self.token_savings.lock().unwrap_or_else(|e| e.into_inner());
+        ts.openai_before += report.token_savings.openai_before;
+        ts.openai_after += report.token_savings.openai_after;
+        ts.anthropic_before += report.token_savings.anthropic_before;
+        ts.anthropic_after += report.token_savings.anthropic_after;
     }
 
     /// Serialize to JSON for the /stats endpoint.
@@ -141,8 +151,8 @@ impl SessionStats {
         let ts = self
             .token_savings
             .lock()
-            .map(|t| t.clone())
-            .unwrap_or_default();
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         serde_json::json!({
             "startedAt": format!("{:.0?}", self.started_at.elapsed()),
             "totalRequests": self.total_requests.load(Ordering::Relaxed),
