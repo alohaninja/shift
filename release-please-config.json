@@ -19,6 +19,11 @@
           "path": "runtime/package.json",
           "jsonpath": "$.version"
         },
+        {
+          "type": "json",
+          "path": "opencode-plugin/package.json",
+          "jsonpath": "$.version"
+        },
         "docs/index.html",
         "docs/guide/index.html"
       ]
