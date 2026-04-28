@@ -49,6 +49,19 @@ The runtime has two integration modes:
 
 Both call the `shift-ai` CLI under the hood. Graceful no-op when `shift-ai` is not installed.
 
+## Versioning
+
+All crates share a single workspace version defined in the root `Cargo.toml` (`version = "X.Y.Z"`). Each crate uses `version.workspace = true` to inherit it.
+
+**When bumping the workspace version**, you must also update the **inter-crate dependency version strings** in every `Cargo.toml` that references a sibling crate. These are the `version = "..."` fields on path dependencies:
+
+- `shift-cli/Cargo.toml` → `shift-preflight` and `shift-proxy` versions
+- `shift-proxy/Cargo.toml` → `shift-preflight` version
+
+The `path = "..."` field makes local builds work regardless, but the `version` field must match for `cargo publish` and CI (which uses `--workspace`). Forgetting this step breaks CI.
+
+After bumping, verify with: `cargo check --workspace`
+
 ## Naming
 
 The workspace has two crates and one npm package with names that differ from directory names:
