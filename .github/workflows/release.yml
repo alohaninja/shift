@@ -206,7 +206,7 @@ jobs:
       - run: bun run build
       - run: bun test
 
-      - name: Publish opencode-shift-proxy
+      - name: Publish @shift-preflight/opencode-plugin
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

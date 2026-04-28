@@ -1,6 +1,6 @@
-# opencode-shift-proxy
+# @shift-preflight/opencode-plugin
 
-[![npm version](https://img.shields.io/npm/v/opencode-shift-proxy)](https://www.npmjs.com/package/opencode-shift-proxy)
+[![npm version](https://img.shields.io/npm/v/@shift-preflight/opencode-plugin)](https://www.npmjs.com/package/@shift-preflight/opencode-plugin)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../LICENSE)
 
 [OpenCode](https://opencode.ai) plugin that auto-starts the [SHIFT](https://github.com/alohaninja/shift) image optimization proxy. Every image-heavy request is transparently optimized before reaching the AI provider — reducing token cost and preventing oversized-image failures.
@@ -22,7 +22,7 @@ Add the plugin to your `opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-shift-proxy"],
+  "plugin": ["@shift-preflight/opencode-plugin"],
   "provider": {
     "anthropic": {
       "options": {
@@ -101,7 +101,7 @@ shift-ai gain --format json  # Machine-readable
 
 | Problem | Fix |
 |---------|-----|
-| Plugin not loading | Verify `"plugin": ["opencode-shift-proxy"]` is in your `opencode.json` |
+| Plugin not loading | Verify `"plugin": ["@shift-preflight/opencode-plugin"]` is in your `opencode.json` |
 | Proxy not starting | Check that `shift-ai` is installed: `which shift-ai` |
 | Requests failing | Ensure `provider.anthropic.options.baseURL` is set to `http://localhost:8787` and the proxy is running |
 | Port 8787 in use | Another process is using the port. Check with `lsof -i :8787` |

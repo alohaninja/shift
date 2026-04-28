@@ -1,5 +1,5 @@
 {
-  "name": "opencode-shift-proxy",
+  "name": "@shift-preflight/opencode-plugin",
   "version": "0.6.1",
   "description": "OpenCode plugin — auto-starts the SHIFT image optimization proxy for transparent token savings",
   "type": "module",

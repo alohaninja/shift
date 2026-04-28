@@ -143,7 +143,7 @@ See [`runtime/README.md`](runtime/README.md) for full documentation.
 
 ```json
 {
-  "plugin": ["opencode-shift-proxy"],
+  "plugin": ["@shift-preflight/opencode-plugin"],
   "provider": {
     "anthropic": {
       "options": {
@@ -160,7 +160,7 @@ See [`opencode-plugin/README.md`](opencode-plugin/README.md) for setup details.
 
 | Agent | Integration | Setup |
 |-------|------------|-------|
-| [OpenCode](https://opencode.ai) | [opencode-shift-proxy](opencode-plugin/) plugin | `"plugin": ["opencode-shift-proxy"]` + provider `baseURL` |
+| [OpenCode](https://opencode.ai) | [@shift-preflight/opencode-plugin](opencode-plugin/) plugin | `"plugin": ["@shift-preflight/opencode-plugin"]` + provider `baseURL` |
 | Claude Code | HTTP Proxy | `ANTHROPIC_BASE_URL=http://localhost:8787 claude` |
 | Codex CLI | HTTP Proxy | `OPENAI_BASE_URL=http://localhost:8787 codex` |
 | Gemini CLI | HTTP Proxy | `GEMINI_API_BASE=http://localhost:8787 gemini` |
