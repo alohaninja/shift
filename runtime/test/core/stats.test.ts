@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { readFile, unlink, mkdir } from "node:fs/promises";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFile, unlink, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -67,6 +67,19 @@ describe("buildRunRecord", () => {
       anthropic_before: 0,
       anthropic_after: 0,
     });
+  });
+
+  it("clamps negative duration_ms to zero", () => {
+    // Negative duration can happen from NTP clock adjustments
+    const record = buildRunRecord({
+      provider: "anthropic",
+      originalBytes: 100_000,
+      optimizedBytes: 40_000,
+      durationMs: -50,
+      source: "proxy",
+    });
+
+    expect(record.duration_ms).toBe(0);
   });
 });
 
@@ -152,10 +165,12 @@ describe("recordRun", () => {
     await unlink(deepPath).catch(() => {});
   });
 
-  it("does not throw on write failure (swallows errors)", async () => {
+  it("does not throw on write failure and logs a warning", async () => {
     // Point at a path that's a directory (can't write to a directory)
     const dirPath = join(tmpdir(), `shift-test-dir-${randomBytes(4).toString("hex")}`);
     await mkdir(dirPath, { recursive: true });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const record = buildRunRecord({
       provider: "anthropic",
@@ -166,6 +181,49 @@ describe("recordRun", () => {
 
     // Should not throw
     await expect(recordRun(record, dirPath)).resolves.toBeUndefined();
+
+    // Should have logged a warning
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[shift-runtime] Failed to write stats:"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("rejects symlinks and logs a warning", async () => {
+    // Create a real file, then a symlink pointing to it
+    const realPath = tmpStatsPath();
+    const symlinkPath = tmpStatsPath();
+
+    // Create the target file
+    const { appendFile: appendFileFs } = await import("node:fs/promises");
+    await appendFileFs(realPath, "", { mode: 0o600 });
+    // Create a symlink to it
+    await symlink(realPath, symlinkPath);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const record = buildRunRecord({
+      provider: "anthropic",
+      originalBytes: 50_000,
+      optimizedBytes: 20_000,
+      durationMs: 50,
+    });
+
+    await recordRun(record, symlinkPath);
+
+    // Should have warned about the symlink
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("is a symlink"),
+    );
+
+    // The real file should NOT have been written to
+    const content = await readFile(realPath, "utf-8");
+    expect(content).toBe("");
+
+    warnSpy.mockRestore();
+    await unlink(symlinkPath).catch(() => {});
+    await unlink(realPath).catch(() => {});
   });
 });
 
@@ -216,5 +274,35 @@ describe("session stats", () => {
     const stats2 = getSessionStats();
     expect(stats1).not.toBe(stats2);
     expect(stats1.tokenSavings).not.toBe(stats2.tokenSavings);
+  });
+
+  it("still accumulates session stats even when file write is skipped (symlink)", async () => {
+    // Session accumulation happens before the file write, so even if
+    // the write is rejected (e.g., symlink), session stats are updated.
+    const realPath = tmpStatsPath();
+    const symlinkPath = tmpStatsPath();
+    const { appendFile: appendFileFs } = await import("node:fs/promises");
+    await appendFileFs(realPath, "", { mode: 0o600 });
+    await symlink(realPath, symlinkPath);
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const record = buildRunRecord({
+      provider: "anthropic",
+      originalBytes: 100_000,
+      optimizedBytes: 40_000,
+      durationMs: 100,
+      source: "proxy",
+    });
+
+    await recordRun(record, symlinkPath);
+
+    const stats = getSessionStats();
+    expect(stats.totalRequests).toBe(1);
+    expect(stats.totalBytesSaved).toBe(60_000);
+
+    vi.restoreAllMocks();
+    await unlink(symlinkPath).catch(() => {});
+    await unlink(realPath).catch(() => {});
   });
 });

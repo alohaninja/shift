@@ -40,7 +40,7 @@ export function createAnthropicHandler(config: ProxyConfig) {
     }
 
     // Record stats (fire-and-forget — never blocks the request)
-    if (optimized && optimizedBytes < originalBytes) {
+    if (optimized) {
       const record = buildRunRecord({
         provider: "anthropic",
         originalBytes,
@@ -48,7 +48,9 @@ export function createAnthropicHandler(config: ProxyConfig) {
         durationMs,
         source: "proxy",
       });
-      recordRun(record).catch(() => {}); // swallow — stats should never fail a request
+      recordRun(record).catch((e) => {
+        // Already logged inside recordRun; outer catch prevents unhandled rejection
+      });
     }
 
     // Forward to the real API

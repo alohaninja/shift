@@ -6,11 +6,20 @@
  * The proxy previously passed --no-stats to shift-ai to avoid per-image
  * noise. This module records one entry per REQUEST instead, matching
  * the granularity the CLI uses (one entry per invocation).
+ *
+ * NOTE: File rotation/retention purge is handled by the Rust CLI
+ * (shift-core/src/stats.rs purge_old_records — auto-purges >90 day
+ * records when the file exceeds 50KB). The TS writer is append-only
+ * and relies on the CLI's purge cycle. This is intentional — the CLI
+ * is the canonical stats manager; the TS side is a lightweight recorder.
+ * TODO: Port retention purge to TS if the proxy is ever used standalone
+ * without the CLI installed.
  */
 
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, lstat, mkdir } from "node:fs/promises";
+import { constants, open } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 // ────────────────────────────────────────────────────────────────────
 // Types — mirrors the Rust RunRecord in shift-core/src/stats.rs
@@ -26,10 +35,20 @@ export interface TokenSavings {
 /**
  * A single stats record, compatible with the Rust `RunRecord` struct.
  *
- * The optional `source` field is a backwards-compatible extension
- * that lets `shift-ai gain` distinguish CLI vs proxy vs middleware
- * records if it ever wants to. The Rust deserializer uses
- * `#[serde(default)]` semantics so unknown fields are ignored.
+ * The optional `source` field is a backwards-compatible extension that
+ * lets `shift-ai gain` distinguish CLI vs proxy vs middleware records
+ * if it ever wants to. Serde's default `Deserialize` impl silently
+ * ignores unknown fields (no `#[serde(deny_unknown_fields)]` on
+ * RunRecord), so the Rust reader will not reject records with `source`.
+ *
+ * CAVEAT: The `source` field will be dropped when the Rust CLI's
+ * `purge_old_records()` re-serializes records through the Rust struct,
+ * since the Rust struct has no `source` field. This is acceptable —
+ * the field is informational, not load-bearing. If it needs to survive
+ * purges, add `source: Option<String>` to the Rust RunRecord.
+ *
+ * TODO: Add a cross-language roundtrip test in CI that writes a
+ * RunRecord from TS and reads it back via the Rust `load_records()`.
  */
 export interface RunRecord {
   /** ISO 8601 timestamp. */
@@ -128,6 +147,18 @@ export function defaultStatsPath(): string {
  *
  * Writes are fire-and-forget in the proxy — a failed write should never
  * block or fail a request. Errors are logged to stderr and swallowed.
+ *
+ * Security: Rejects symlinks on the stats file to match the Rust CLI's
+ * O_NOFOLLOW behavior (shift-core/src/stats.rs:168-182). Uses lstat to
+ * detect symlinks before opening. This is a TOCTOU check (not as strong
+ * as O_NOFOLLOW on the open call itself), but matches the Rust non-Unix
+ * fallback path and prevents the most common symlink attacks.
+ *
+ * Permissions: The `mode: 0o600` flag only applies when creating a new
+ * file. If the file already exists with different permissions, they are
+ * NOT corrected. This matches the Rust CLI's behavior.
+ *
+ * @param statsPath - Override path for testing. @internal
  */
 export async function recordRun(
   record: RunRecord,
@@ -138,9 +169,22 @@ export async function recordRun(
 
   const filePath = statsPath ?? defaultStatsPath();
   try {
-    // Ensure ~/.shift directory exists
-    const dir = join(filePath, "..");
+    // Ensure parent directory exists
+    const dir = dirname(filePath);
     await mkdir(dir, { recursive: true });
+
+    // Reject symlinks (defense-in-depth, matching Rust's O_NOFOLLOW)
+    try {
+      const stat = await lstat(filePath);
+      if (stat.isSymbolicLink()) {
+        console.warn(
+          `[shift-runtime] Refusing to write stats: ${filePath} is a symlink`,
+        );
+        return;
+      }
+    } catch {
+      // File doesn't exist yet — that's fine, appendFile will create it
+    }
 
     const line = JSON.stringify(record) + "\n";
     await appendFile(filePath, line, { mode: 0o600 });
@@ -167,9 +211,14 @@ export interface RecordRunInput {
  *
  * The proxy doesn't have per-image breakdowns (shift-ai is called on
  * the whole payload), so we estimate: if bytes were saved, at least
- * 1 image was modified. For token estimation we leave zeros — the CLI
- * records accurate per-image token counts via its pipeline report;
- * proxy records capture byte savings which is the primary metric.
+ * 1 image was modified. The actual image count may be higher for
+ * multi-image payloads — this is a known limitation that causes
+ * `shift-ai gain` to undercount images for proxy traffic. The byte
+ * savings metrics (bytes_before, bytes_after) are always accurate.
+ *
+ * For token estimation we leave zeros — the CLI records accurate
+ * per-image token counts via its pipeline report; proxy records
+ * capture byte savings which is the primary metric.
  */
 export function buildRunRecord(input: RecordRunInput): RunRecord {
   const now = new Date();
@@ -190,7 +239,9 @@ export function buildRunRecord(input: RecordRunInput): RunRecord {
       anthropic_before: 0,
       anthropic_after: 0,
     },
-    duration_ms: Math.round(input.durationMs),
+    // Clamp to 0 to avoid negative values from NTP clock adjustments.
+    // Rust deserializes duration_ms as u64 which rejects negatives.
+    duration_ms: Math.max(0, Math.round(input.durationMs)),
     action_counts: wasSaved ? [["optimize", 1]] : [],
     source: input.source,
   };

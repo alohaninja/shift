@@ -39,7 +39,7 @@ export function createOpenAIHandler(config: ProxyConfig) {
     }
 
     // Record stats (fire-and-forget — never blocks the request)
-    if (optimized && optimizedBytes < originalBytes) {
+    if (optimized) {
       const record = buildRunRecord({
         provider: "openai",
         originalBytes,
@@ -47,7 +47,9 @@ export function createOpenAIHandler(config: ProxyConfig) {
         durationMs,
         source: "proxy",
       });
-      recordRun(record).catch(() => {});
+      recordRun(record).catch((e) => {
+        // Already logged inside recordRun; outer catch prevents unhandled rejection
+      });
     }
 
     const headers = forwardHeaders(c.req.raw.headers, [
