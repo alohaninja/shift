@@ -180,6 +180,37 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+  # ── Publish OpenCode plugin to npm ─────────────────────────
+  publish-opencode-plugin:
+    needs: [release-please]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions: {}
+    defaults:
+      run:
+        working-directory: opencode-plugin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: bun install
+      - run: bun run typecheck
+      - run: bun run build
+      - run: bun test
+
+      - name: Publish opencode-shift-proxy
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
   # ── Update Homebrew formula ──────────────────────────────────
   update-homebrew:
     needs: [release-please, publish-release]

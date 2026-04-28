@@ -102,6 +102,31 @@ jobs:
           tail -5 test-output.txt >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
 
+  # ── OpenCode Plugin (TypeScript/Bun) ────────────────────────
+  opencode-plugin:
+    name: OpenCode Plugin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: opencode-plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun run typecheck
+      - run: bun run build
+      - name: Run tests
+        run: bun test 2>&1 | tee test-output.txt
+      - name: Summarize test results
+        if: always()
+        run: |
+          echo "### OpenCode Plugin Test Results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -5 test-output.txt >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
   # ── Security audit ─────────────────────────────────────────
   audit:
     name: Security Audit
@@ -119,21 +144,23 @@ jobs:
   ci-pass:
     name: CI Pass
     if: always()
-    needs: [fmt, clippy, test, build, runtime]
+    needs: [fmt, clippy, test, build, runtime, opencode-plugin]
     runs-on: ubuntu-latest
     steps:
       - name: Check results
         run: |
-          echo "fmt:     ${{ needs.fmt.result }}"
-          echo "clippy:  ${{ needs.clippy.result }}"
-          echo "test:    ${{ needs.test.result }}"
-          echo "build:   ${{ needs.build.result }}"
-          echo "runtime: ${{ needs.runtime.result }}"
+          echo "fmt:             ${{ needs.fmt.result }}"
+          echo "clippy:          ${{ needs.clippy.result }}"
+          echo "test:            ${{ needs.test.result }}"
+          echo "build:           ${{ needs.build.result }}"
+          echo "runtime:         ${{ needs.runtime.result }}"
+          echo "opencode-plugin: ${{ needs.opencode-plugin.result }}"
           if [[ "${{ needs.fmt.result }}" != "success" ]] || \
              [[ "${{ needs.clippy.result }}" != "success" ]] || \
              [[ "${{ needs.test.result }}" != "success" ]] || \
              [[ "${{ needs.build.result }}" != "success" ]] || \
-             [[ "${{ needs.runtime.result }}" != "success" ]]; then
+             [[ "${{ needs.runtime.result }}" != "success" ]] || \
+             [[ "${{ needs.opencode-plugin.result }}" != "success" ]]; then
             echo "::error::One or more CI jobs failed"
             exit 1
           fi
