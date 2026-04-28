@@ -64,10 +64,22 @@ After bumping, verify with: `cargo check --workspace`
 
 ## Naming
 
-The workspace has two crates and one npm package with names that differ from directory names:
+The workspace has two crates and two npm packages with names that differ from directory names:
 
 | Directory | Package name | Binary / Entry |
 |-----------|-----------|--------|
 | `shift-core/` | `shift-preflight` | (library) |
+| `shift-proxy/` | `shift-proxy` | (library) |
 | `shift-cli/` | `shift-preflight-cli` | `shift-ai` |
 | `runtime/` | `@shift-preflight/runtime` | `shift-runtime` (CLI) |
+| `opencode-plugin/` | `@shift-preflight/opencode-plugin` | (plugin) |
+
+## Publishing
+
+Crates must be published to crates.io in dependency order (`.github/workflows/release.yml`):
+
+1. `shift-preflight` (no internal deps)
+2. `shift-proxy` (depends on `shift-preflight`)
+3. `shift-preflight-cli` (depends on both)
+
+Each step retries with 30s waits for crates.io index propagation. **When adding a new workspace crate**, add it to the publish sequence in the correct dependency order.
