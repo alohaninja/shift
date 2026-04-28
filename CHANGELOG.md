@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3](https://github.com/alohaninja/shift/compare/v0.9.2...v0.9.3) (2026-04-28)
+
+
+### Bug Fixes
+
+* add shift-proxy to crates.io publish pipeline ([#40](https://github.com/alohaninja/shift/issues/40)) ([daa82a0](https://github.com/alohaninja/shift/commit/daa82a05ac87a8dde463ebe5cf8cb358129e92fe))
+
 ## [0.9.2](https://github.com/alohaninja/shift/compare/v0.9.1...v0.9.2) (2026-04-28)
 
 
