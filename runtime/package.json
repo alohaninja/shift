@@ -1,6 +1,6 @@
 {
   "name": "@shift-preflight/runtime",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Multimodal preflight for any AI agent — AI SDK middleware + HTTP proxy",
   "type": "module",
   "main": "./dist/index.js",
