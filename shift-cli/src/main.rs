@@ -5,6 +5,10 @@ use shift_preflight::report::fmt_tokens;
 use shift_preflight::{DriveMode, ImageMetrics, ShiftConfig, SvgMode, TokenSavings};
 use std::io::{IsTerminal, Read};
 
+mod env;
+mod proxy;
+mod setup;
+
 /// SHIFT — Smart Hybrid Input Filtering & Transformation
 ///
 /// A multimodal preflight layer that automatically adapts inputs
@@ -107,6 +111,99 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+
+    /// Manage the SHIFT preflight proxy daemon
+    ///
+    /// The proxy intercepts AI API requests and optimizes image payloads
+    /// before forwarding to the provider. It supports Anthropic, OpenAI,
+    /// and Google routes simultaneously.
+    Proxy {
+        #[command(subcommand)]
+        action: ProxyAction,
+    },
+
+    /// Output shell environment variables for an AI agent
+    ///
+    /// Prints export commands that configure the specified agent to route
+    /// API traffic through the SHIFT proxy. Add to your shell profile:
+    ///
+    ///   eval "$(shift-ai env claude-code)"
+    Env {
+        /// Agent name: opencode, claude-code, codex, gemini, cursor
+        agent: Option<String>,
+
+        /// Proxy port
+        #[arg(long, default_value = "8787")]
+        port: u16,
+
+        /// Show all agents
+        #[arg(long)]
+        all: bool,
+
+        /// List supported agents and their env vars
+        #[arg(long)]
+        list: bool,
+    },
+
+    /// Interactive setup for multi-agent SHIFT integration
+    ///
+    /// Detects installed AI agents, configures each to use the SHIFT proxy,
+    /// and optionally installs a macOS LaunchAgent for auto-start.
+    Setup,
+}
+
+#[derive(Subcommand, Debug)]
+enum ProxyAction {
+    /// Start the proxy daemon (idempotent — skips if already running)
+    Start {
+        /// Port to listen on
+        #[arg(long, default_value = "8787")]
+        port: u16,
+
+        /// Drive mode: performance, balanced, economy
+        #[arg(long, default_value = "balanced")]
+        mode: String,
+
+        /// Suppress output
+        #[arg(long)]
+        quiet: bool,
+
+        /// Run in foreground (for LaunchAgent / systemd)
+        #[arg(long)]
+        foreground: bool,
+    },
+
+    /// Stop the proxy daemon
+    Stop {
+        /// Suppress output
+        #[arg(long)]
+        quiet: bool,
+    },
+
+    /// Show proxy status
+    Status {
+        /// Port to check
+        #[arg(long, default_value = "8787")]
+        port: u16,
+    },
+
+    /// Ensure proxy is running (start if needed, no-op if healthy)
+    ///
+    /// This is the primary command that agent plugins should call.
+    /// It's fast (<5ms) when the proxy is already running.
+    Ensure {
+        /// Port to listen on
+        #[arg(long, default_value = "8787")]
+        port: u16,
+
+        /// Drive mode: performance, balanced, economy
+        #[arg(long, default_value = "balanced")]
+        mode: String,
+
+        /// Suppress output
+        #[arg(long)]
+        quiet: bool,
+    },
 }
 
 /// Structured preflight report output (JSON to stdout).
@@ -162,6 +259,44 @@ fn run() -> Result<()> {
                 profile.as_deref(),
                 *verbose,
             ),
+            Commands::Proxy { action } => match action {
+                ProxyAction::Start {
+                    port,
+                    mode,
+                    quiet,
+                    foreground,
+                } => {
+                    if *foreground {
+                        // In foreground mode, just start and block
+                        // (for LaunchAgent / systemd — the proxy itself handles this)
+                        proxy::start(Some(*port), Some(mode.as_str()), *quiet)
+                    } else {
+                        proxy::start(Some(*port), Some(mode.as_str()), *quiet)
+                    }
+                }
+                ProxyAction::Stop { quiet } => proxy::stop(*quiet),
+                ProxyAction::Status { port } => proxy::status(Some(*port)),
+                ProxyAction::Ensure { port, mode, quiet } => {
+                    proxy::ensure(Some(*port), Some(mode.as_str()), *quiet)
+                }
+            },
+            Commands::Env {
+                agent,
+                port,
+                all,
+                list,
+            } => {
+                if *list {
+                    env::print_agent_list(Some(*port))
+                } else if *all {
+                    env::print_env_all(Some(*port))
+                } else if let Some(agent) = agent {
+                    env::print_env(agent, Some(*port))
+                } else {
+                    env::print_agent_list(Some(*port))
+                }
+            }
+            Commands::Setup => setup::run_setup(),
         };
     }
 

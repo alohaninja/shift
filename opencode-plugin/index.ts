@@ -1,12 +1,8 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import { version as PACKAGE_VERSION } from "./package.json";
 
 const DEFAULT_PORT = 8787;
-const DEFAULT_MODE = "balanced";
 const PROBE_TIMEOUT_MS = 2_000;
-const SPAWN_SETTLE_MS = 2_000;
 const HEALTH_SERVICE_ID = "@shift-preflight/runtime proxy";
-const RUNTIME_PACKAGE = `@shift-preflight/runtime@${PACKAGE_VERSION}`;
 
 /**
  * OpenCode plugin that auto-starts the SHIFT preflight proxy.
@@ -26,11 +22,11 @@ const RUNTIME_PACKAGE = `@shift-preflight/runtime@${PACKAGE_VERSION}`;
  * 2. Add the plugin and provider config to `opencode.json`:
  *    ```json
  *    {
- *      "plugin": ["opencode-shift-proxy"],
+ *      "plugin": ["@shift-preflight/opencode-plugin"],
  *      "provider": {
  *        "anthropic": {
  *          "options": {
- *            "baseURL": "http://localhost:8787"
+ *            "baseURL": "http://localhost:8787/v1"
  *          }
  *        }
  *      }
@@ -44,15 +40,12 @@ const RUNTIME_PACKAGE = `@shift-preflight/runtime@${PACKAGE_VERSION}`;
  * On startup, the plugin:
  * 1. Checks if `shift-ai` is installed — silently skips if not.
  * 2. Probes `localhost:8787/health` — if the SHIFT proxy is already
- *    running, skips. Verifies the service identity to avoid trusting
- *    an unrelated process on the same port.
- * 3. Spawns `npx @shift-preflight/runtime proxy` as a detached
- *    background process. The proxy listens on port 8787 and optimizes
- *    images in all requests before forwarding to the upstream API.
- * 4. Waits briefly to confirm the proxy is healthy before returning.
+ *    running, skips.
+ * 3. Runs `shift-ai proxy ensure` to start the proxy if needed.
+ *    The proxy listens on port 8787 and optimizes images in all
+ *    requests before forwarding to the upstream API.
  *
- * The proxy is shared across OpenCode sessions. Other agents can also
- * use it by setting the appropriate env var:
+ * The proxy is shared across sessions. Other agents can also use it:
  * ```bash
  * ANTHROPIC_BASE_URL=http://localhost:8787 claude   # Claude Code
  * OPENAI_BASE_URL=http://localhost:8787 codex       # Codex CLI
@@ -62,74 +55,29 @@ const RUNTIME_PACKAGE = `@shift-preflight/runtime@${PACKAGE_VERSION}`;
  */
 export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
   const port = DEFAULT_PORT;
-  const mode = DEFAULT_MODE;
 
-  // Bail if shift-ai CLI is not installed (proxy depends on it)
+  // Bail if shift-ai CLI is not installed
   try {
     await $`which shift-ai`.quiet();
   } catch {
     return {};
   }
 
-  // Check if the SHIFT proxy is already running by probing the health endpoint.
-  // Verify the service identity to avoid trusting an unrelated process on the port.
+  // Already running?
   if (await isShiftProxyHealthy(port)) {
     return {};
   }
 
-  // Start proxy as a detached background process.
-  // Only pass PATH/HOME/SHELL to the child — the proxy doesn't need API keys
-  // and we don't want npm lifecycle scripts to have access to them.
+  // Use `shift-ai proxy ensure` — handles daemon lifecycle, PID files,
+  // health checks, and version-pinned npx spawn internally.
   try {
-    const proc = Bun.spawn(
-      [
-        "npx",
-        RUNTIME_PACKAGE,
-        "proxy",
-        "--port",
-        String(port),
-        "--mode",
-        mode,
-      ],
-      {
-        detached: true,
-        stdout: "ignore",
-        stderr: "ignore",
-        stdin: "ignore",
-        env: {
-          PATH: process.env.PATH ?? "",
-          HOME: process.env.HOME ?? "",
-          SHELL: process.env.SHELL ?? "",
-          TMPDIR: process.env.TMPDIR ?? "",
-          npm_config_registry: process.env.npm_config_registry ?? "",
-        },
-      },
-    );
-    proc.unref();
+    await $`shift-ai proxy ensure --quiet`.quiet();
 
-    // Detect immediate crash vs successful startup.
-    // Clear the timer when proc.exited wins the race to avoid leaking it.
-    let settleTimer: ReturnType<typeof setTimeout>;
-    const exitCode = await Promise.race([
-      proc.exited.then((code) => {
-        clearTimeout(settleTimer);
-        return code;
-      }),
-      new Promise<null>((r) => {
-        settleTimer = setTimeout(() => r(null), SPAWN_SETTLE_MS);
-      }),
-    ]);
-
-    if (exitCode !== null) {
-      console.warn(`[shift] proxy exited immediately with code ${exitCode}`);
-      console.warn(
-        `[shift] To bypass, remove baseURL from provider config in opencode.json`,
-      );
-    } else if (await isShiftProxyHealthy(port)) {
-      console.log(`[shift] proxy started on port ${port} (mode: ${mode})`);
+    if (await isShiftProxyHealthy(port)) {
+      console.log(`[shift] proxy started on port ${port}`);
     } else {
       console.warn(
-        `[shift] proxy spawned but not responding on port ${port} — it may still be starting`,
+        `[shift] proxy ensure completed but not yet responding on port ${port}`,
       );
     }
   } catch (err) {
