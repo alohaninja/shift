@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/alohaninja/shift/compare/v0.7.0...v0.7.1) (2026-04-28)
+
+
+### Bug Fixes
+
+* **runtime:** lazy-load Node APIs in stats module to prevent import crash ([#30](https://github.com/alohaninja/shift/issues/30)) ([b1557aa](https://github.com/alohaninja/shift/commit/b1557aaaaf5999da0f921431ea90610cc545a594))
+
 ## [0.7.0](https://github.com/alohaninja/shift/compare/v0.6.2...v0.7.0) (2026-04-28)
 
 
