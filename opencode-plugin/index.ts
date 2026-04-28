@@ -1,10 +1,12 @@
 import type { Plugin } from "@opencode-ai/plugin";
+import { version as PACKAGE_VERSION } from "./package.json";
 
 const DEFAULT_PORT = 8787;
 const DEFAULT_MODE = "balanced";
 const PROBE_TIMEOUT_MS = 2_000;
 const SPAWN_SETTLE_MS = 2_000;
 const HEALTH_SERVICE_ID = "@shift-preflight/runtime proxy";
+const RUNTIME_PACKAGE = `@shift-preflight/runtime@${PACKAGE_VERSION}`;
 
 /**
  * OpenCode plugin that auto-starts the SHIFT preflight proxy.
@@ -75,12 +77,14 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
     return {};
   }
 
-  // Start proxy as a detached background process
+  // Start proxy as a detached background process.
+  // Only pass PATH/HOME/SHELL to the child — the proxy doesn't need API keys
+  // and we don't want npm lifecycle scripts to have access to them.
   try {
     const proc = Bun.spawn(
       [
         "npx",
-        "@shift-preflight/runtime@0.5.1",
+        RUNTIME_PACKAGE,
         "proxy",
         "--port",
         String(port),
@@ -92,14 +96,28 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
         stdout: "ignore",
         stderr: "ignore",
         stdin: "ignore",
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: process.env.HOME ?? "",
+          SHELL: process.env.SHELL ?? "",
+          TMPDIR: process.env.TMPDIR ?? "",
+          npm_config_registry: process.env.npm_config_registry ?? "",
+        },
       },
     );
     proc.unref();
 
-    // Detect immediate crash vs successful startup
+    // Detect immediate crash vs successful startup.
+    // Clear the timer when proc.exited wins the race to avoid leaking it.
+    let settleTimer: ReturnType<typeof setTimeout>;
     const exitCode = await Promise.race([
-      proc.exited.then((code) => code),
-      new Promise<null>((r) => setTimeout(() => r(null), SPAWN_SETTLE_MS)),
+      proc.exited.then((code) => {
+        clearTimeout(settleTimer);
+        return code;
+      }),
+      new Promise<null>((r) => {
+        settleTimer = setTimeout(() => r(null), SPAWN_SETTLE_MS);
+      }),
     ]);
 
     if (exitCode !== null) {
@@ -134,6 +152,7 @@ async function isShiftProxyHealthy(port: number): Promise<boolean> {
     const res = await fetch(`http://localhost:${port}/health`, {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
+    if (!res.ok) return false;
     const body = (await res.json()) as { service?: string };
     return body?.service === HEALTH_SERVICE_ID;
   } catch {

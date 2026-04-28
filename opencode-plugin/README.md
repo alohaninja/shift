@@ -40,8 +40,11 @@ OpenCode auto-installs npm plugins at startup via Bun. No `npm install` needed.
 On every OpenCode launch:
 
 1. **Checks prerequisites** — verifies `shift-ai` is on PATH. Silently skips if not installed.
-2. **Probes port 8787** — if the proxy is already running (from a previous session or another agent), skips startup. Fully idempotent.
-3. **Starts the proxy** — spawns `npx @shift-preflight/runtime proxy --port 8787 --mode balanced` as a detached background process. Does not block OpenCode startup.
+2. **Probes port 8787** — if the SHIFT proxy is already running (from a previous session or another agent), skips startup. Verifies the proxy identity to avoid trusting unrelated services on the same port. Fully idempotent.
+3. **Starts the proxy** — spawns the proxy as a detached background process with a sanitized environment (API keys are not passed to the child process).
+4. **Verifies startup** — waits briefly to confirm the proxy is healthy. Logs a warning with bypass instructions if it fails.
+
+Startup verification adds up to ~6s on first launch; subsequent launches detect the running proxy instantly.
 
 The `provider.anthropic.options.baseURL` config routes all Anthropic requests through the proxy. The proxy optimizes images, then forwards to the real Anthropic API. Auth headers and SSE streams pass through unchanged.
 
@@ -56,8 +59,8 @@ ANTHROPIC_BASE_URL=http://localhost:8787 claude
 # Codex CLI
 OPENAI_BASE_URL=http://localhost:8787 codex
 
-# Gemini CLI
-GEMINI_API_BASE=http://localhost:8787 gemini
+# Gemini CLI (check Gemini CLI docs for the correct env var)
+# GEMINI_API_BASE=http://localhost:8787 gemini
 ```
 
 Once OpenCode starts the proxy, other agents piggyback on it — no need to start it separately.
@@ -82,7 +85,7 @@ npx @shift-preflight/runtime proxy --port 8787 --mode economy
 |-------|----------|
 | `POST /v1/messages` | Anthropic |
 | `POST /v1/chat/completions` | OpenAI |
-| `POST /v1beta/models/*` | Google (passthrough) |
+| `POST /v1beta/models/*` | Google (passthrough only — no image optimization yet) |
 
 ## Checking savings
 
