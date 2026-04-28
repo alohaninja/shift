@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/alohaninja/shift/compare/v0.6.1...v0.6.2) (2026-04-28)
+
+
+### Bug Fixes
+
+* rename opencode-shift-proxy to @shift-preflight/opencode-plugin ([d72a6a1](https://github.com/alohaninja/shift/commit/d72a6a15c7b279b03763904f06262ecc7d44cea6))
+
 ## [0.6.1](https://github.com/alohaninja/shift/compare/v0.6.0...v0.6.1) (2026-04-28)
 
 
