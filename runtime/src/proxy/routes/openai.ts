@@ -47,7 +47,7 @@ export function createOpenAIHandler(config: ProxyConfig) {
         durationMs,
         source: "proxy",
       });
-      recordRun(record).catch((e) => {
+      recordRun(record).catch(() => {
         // Already logged inside recordRun; outer catch prevents unhandled rejection
       });
     }

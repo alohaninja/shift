@@ -17,7 +17,6 @@
  */
 
 import { appendFile, lstat, mkdir } from "node:fs/promises";
-import { constants, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
