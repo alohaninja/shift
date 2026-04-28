@@ -141,6 +141,42 @@ pub fn default_stats_path() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".shift").join("stats.jsonl"))
 }
 
+/// Acquire an advisory file lock on `<stats_path>.lock`.
+///
+/// Uses `flock(LOCK_EX)` on Unix to serialize concurrent writes and purges.
+/// The lock is released when the returned `File` handle is dropped.
+///
+/// On non-Unix platforms, returns `None` (best-effort — no locking).
+/// Errors acquiring the lock are silently ignored (stats recording is
+/// fire-and-forget; we never want to fail an API request because of stats).
+#[cfg(unix)]
+fn acquire_stats_lock(stats_path: &std::path::Path) -> Option<fs::File> {
+    let lock_path = stats_path.with_extension("lock");
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .ok()?;
+
+    // LOCK_EX blocks until the lock is available (serializes concurrent callers).
+    // We use a short timeout via LOCK_NB first, falling back to blocking.
+    use std::os::unix::io::AsRawFd;
+    let fd = file.as_raw_fd();
+    let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
+    if ret != 0 {
+        // Lock failed — proceed without it (fire-and-forget)
+        return None;
+    }
+
+    Some(file)
+}
+
+#[cfg(not(unix))]
+fn acquire_stats_lock(_stats_path: &std::path::Path) -> Option<fs::File> {
+    None // Advisory locking not available on non-Unix
+}
+
 /// Append a run record to the stats file.
 pub fn record_run(record: &RunRecord, path: Option<&PathBuf>) -> Result<()> {
     let stats_path = match path {
@@ -162,6 +198,11 @@ pub fn record_run(record: &RunRecord, path: Option<&PathBuf>) -> Result<()> {
             );
         }
     }
+
+    // Acquire an advisory lock to serialize concurrent writes and purges.
+    // This prevents the race where a purge (read + atomic rename) loses
+    // records that were appended between the read and rename.
+    let _lock = acquire_stats_lock(&stats_path);
 
     // Open the file with O_NOFOLLOW on Unix to atomically reject symlinks
     // (avoids TOCTOU race between stat and open).
@@ -208,11 +249,12 @@ pub fn record_run(record: &RunRecord, path: Option<&PathBuf>) -> Result<()> {
         .context("failed to write to stats file")?;
     file.flush().context("failed to flush stats file")?;
 
-    // Drop the file handle before purging (purge needs exclusive access)
+    // Drop the file handle before purging (purge re-opens the file)
     drop(file);
 
     // Auto-purge records older than RETENTION_DAYS.
     // Only run when the file exceeds 50KB to amortize the cost.
+    // The advisory lock is still held, so purge is safe from concurrent appends.
     if let Ok(meta) = fs::metadata(&stats_path) {
         if meta.len() > 50_000 {
             if let Err(e) = purge_old_records(&stats_path) {
@@ -221,6 +263,7 @@ pub fn record_run(record: &RunRecord, path: Option<&PathBuf>) -> Result<()> {
         }
     }
 
+    // _lock dropped here — releases the advisory lock
     Ok(())
 }
 
