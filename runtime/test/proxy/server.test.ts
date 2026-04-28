@@ -17,12 +17,13 @@ describe("proxy server", () => {
     vi.clearAllMocks();
   });
 
-  it("responds to health check", async () => {
+  it("responds to health check with version", async () => {
     const res = await app.request("/health");
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe("ok");
     expect(body.service).toBe("@shift-preflight/runtime proxy");
+    expect(body.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
   it("responds to /stats with session stats", async () => {

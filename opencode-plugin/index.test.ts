@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import type { BunShell } from "@opencode-ai/plugin/dist/shell";
+import { version as PACKAGE_VERSION } from "./package.json";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -40,8 +41,25 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-/** Standard healthy SHIFT proxy response. */
-const SHIFT_HEALTH_RESPONSE = { status: "ok", service: "@shift-preflight/runtime proxy" };
+/** Standard healthy SHIFT proxy response with current version. */
+const SHIFT_HEALTH_RESPONSE = {
+  status: "ok",
+  service: "@shift-preflight/runtime proxy",
+  version: PACKAGE_VERSION,
+};
+
+/** Healthy response from an older proxy version (no version field). */
+const SHIFT_HEALTH_RESPONSE_NO_VERSION = {
+  status: "ok",
+  service: "@shift-preflight/runtime proxy",
+};
+
+/** Healthy response from a stale proxy version. */
+const SHIFT_HEALTH_RESPONSE_STALE = {
+  status: "ok",
+  service: "@shift-preflight/runtime proxy",
+  version: "0.6.2",
+};
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -85,9 +103,9 @@ describe("ShiftProxyPlugin", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Path 2: shift-ai installed, proxy already running → skip
+  // Path 2: shift-ai installed, proxy already running at correct version → skip
   // -------------------------------------------------------------------------
-  describe("when proxy is already running", () => {
+  describe("when proxy is already running at correct version", () => {
     it("returns empty hooks without spawning", async () => {
       const fetchMock = mock(() =>
         Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE)),
@@ -132,7 +150,127 @@ describe("ShiftProxyPlugin", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Path 3: spawn proxy — success
+  // Path 3: proxy running at stale version → restart
+  // -------------------------------------------------------------------------
+  describe("when proxy is running at a stale version", () => {
+    it("logs version mismatch and restarts the proxy", async () => {
+      let fetchCallCount = 0;
+      const fetchMock = mock(() => {
+        fetchCallCount++;
+        // First probe: old version running
+        if (fetchCallCount === 1) {
+          return Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE_STALE));
+        }
+        // Post-restart probe: new version healthy
+        return Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE));
+      });
+      globalThis.fetch = fetchMock as any;
+
+      // Mock lsof for stopProxy — return a fake PID
+      const lsofMockProc = {
+        stdout: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("12345\n"));
+            controller.close();
+          },
+        }),
+        exited: Promise.resolve(0),
+      };
+
+      const newProxyProc = {
+        unref: mock(() => {}),
+        exited: new Promise<number>(() => {}),
+      };
+
+      let spawnCallCount = 0;
+      const spawnMock = mock((..._args: any[]) => {
+        spawnCallCount++;
+        // First spawn call is lsof from stopProxy
+        if (spawnCallCount === 1) return lsofMockProc;
+        // Second spawn call is the new proxy
+        return newProxyProc;
+      }) as any;
+      Bun.spawn = spawnMock;
+
+      // Mock process.kill so we don't actually kill anything
+      const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+      const { ShiftProxyPlugin } = await import("./index");
+      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+
+      // Should have logged the version mismatch
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining("version mismatch: running 0.6.2"),
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`expected ${PACKAGE_VERSION}`),
+      );
+
+      // Should have tried to kill the old process
+      expect(killSpy).toHaveBeenCalledWith(12345, "SIGTERM");
+
+      // Should have spawned a new proxy
+      expect(spawnMock).toHaveBeenCalledTimes(2); // lsof + npx
+      const [npxArgs] = spawnMock.mock.calls[1];
+      expect(npxArgs[0]).toBe("npx");
+      expect(npxArgs[1]).toMatch(/^@shift-preflight\/runtime@/);
+
+      killSpy.mockRestore();
+    });
+
+    it("treats proxy with no version field as stale (pre-0.8.0)", async () => {
+      let fetchCallCount = 0;
+      const fetchMock = mock(() => {
+        fetchCallCount++;
+        if (fetchCallCount === 1) {
+          return Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE_NO_VERSION));
+        }
+        return Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE));
+      });
+      globalThis.fetch = fetchMock as any;
+
+      const lsofMockProc = {
+        stdout: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("99999\n"));
+            controller.close();
+          },
+        }),
+        exited: Promise.resolve(0),
+      };
+
+      const newProxyProc = {
+        unref: mock(() => {}),
+        exited: new Promise<number>(() => {}),
+      };
+
+      let spawnCallCount = 0;
+      const spawnMock = mock((..._args: any[]) => {
+        spawnCallCount++;
+        if (spawnCallCount === 1) return lsofMockProc;
+        return newProxyProc;
+      }) as any;
+      Bun.spawn = spawnMock;
+
+      const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+      const { ShiftProxyPlugin } = await import("./index");
+      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+
+      // Should log mismatch with "unknown" version
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining("version mismatch: running unknown"),
+      );
+
+      // Should have spawned a new proxy after stopping the old one
+      expect(spawnMock).toHaveBeenCalledTimes(2);
+
+      killSpy.mockRestore();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Path 4: spawn proxy — success (no proxy running initially)
   // -------------------------------------------------------------------------
   describe("when proxy needs to be started", () => {
     it("spawns with correct args, detached, sanitized env, and calls unref", async () => {
@@ -180,7 +318,10 @@ describe("ShiftProxyPlugin", () => {
       expect(mockProc.unref).toHaveBeenCalledTimes(1);
 
       expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining("proxy started on port 8787"),
+        expect.stringContaining("proxy v"),
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining("started on port 8787"),
       );
     });
 
@@ -246,7 +387,7 @@ describe("ShiftProxyPlugin", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Path 4: spawn fails entirely
+  // Path 5: spawn fails entirely
   // -------------------------------------------------------------------------
   describe("when spawn throws", () => {
     it("warns with actionable error message", async () => {

@@ -8,6 +8,14 @@ const SPAWN_SETTLE_MS = 2_000;
 const HEALTH_SERVICE_ID = "@shift-preflight/runtime proxy";
 const RUNTIME_PACKAGE = `@shift-preflight/runtime@${PACKAGE_VERSION}`;
 
+/** Result of probing the running proxy's health endpoint. */
+interface ProxyProbeResult {
+  /** Whether the proxy is running and healthy. */
+  healthy: boolean;
+  /** The runtime version reported by the proxy, if available. */
+  version?: string;
+}
+
 /**
  * OpenCode plugin that auto-starts the SHIFT preflight proxy.
  *
@@ -26,11 +34,11 @@ const RUNTIME_PACKAGE = `@shift-preflight/runtime@${PACKAGE_VERSION}`;
  * 2. Add the plugin and provider config to `opencode.json`:
  *    ```json
  *    {
- *      "plugin": ["opencode-shift-proxy"],
+ *      "plugin": ["@shift-preflight/opencode-plugin"],
  *      "provider": {
  *        "anthropic": {
  *          "options": {
- *            "baseURL": "http://localhost:8787"
+ *            "baseURL": "http://localhost:8787/v1"
  *          }
  *        }
  *      }
@@ -44,12 +52,13 @@ const RUNTIME_PACKAGE = `@shift-preflight/runtime@${PACKAGE_VERSION}`;
  * On startup, the plugin:
  * 1. Checks if `shift-ai` is installed — silently skips if not.
  * 2. Probes `localhost:8787/health` — if the SHIFT proxy is already
- *    running, skips. Verifies the service identity to avoid trusting
- *    an unrelated process on the same port.
- * 3. Spawns `npx @shift-preflight/runtime proxy` as a detached
+ *    running **at the expected version**, skips.
+ * 3. If the proxy is running an older version, kills it gracefully
+ *    before spawning the new one.
+ * 4. Spawns `npx @shift-preflight/runtime proxy` as a detached
  *    background process. The proxy listens on port 8787 and optimizes
  *    images in all requests before forwarding to the upstream API.
- * 4. Waits briefly to confirm the proxy is healthy before returning.
+ * 5. Waits briefly to confirm the proxy is healthy before returning.
  *
  * The proxy is shared across OpenCode sessions. Other agents can also
  * use it by setting the appropriate env var:
@@ -72,9 +81,22 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
   }
 
   // Check if the SHIFT proxy is already running by probing the health endpoint.
-  // Verify the service identity to avoid trusting an unrelated process on the port.
-  if (await isShiftProxyHealthy(port)) {
-    return {};
+  const probe = await probeShiftProxy(port);
+
+  if (probe.healthy) {
+    // Proxy is running — check if it's the version we expect.
+    // If the proxy doesn't report a version (pre-0.8.0), treat it as stale
+    // since version-aware health was added in 0.8.0.
+    if (probe.version === PACKAGE_VERSION) {
+      return {};
+    }
+
+    // Version mismatch — stop the old proxy so we can start the new one.
+    const old = probe.version ?? "unknown";
+    console.log(
+      `[shift] proxy version mismatch: running ${old}, expected ${PACKAGE_VERSION} — restarting`,
+    );
+    await stopProxy(port);
   }
 
   // Start proxy as a detached background process.
@@ -125,12 +147,15 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
       console.warn(
         `[shift] To bypass, remove baseURL from provider config in opencode.json`,
       );
-    } else if (await isShiftProxyHealthy(port)) {
-      console.log(`[shift] proxy started on port ${port} (mode: ${mode})`);
     } else {
-      console.warn(
-        `[shift] proxy spawned but not responding on port ${port} — it may still be starting`,
-      );
+      const postProbe = await probeShiftProxy(port);
+      if (postProbe.healthy) {
+        console.log(`[shift] proxy v${PACKAGE_VERSION} started on port ${port} (mode: ${mode})`);
+      } else {
+        console.warn(
+          `[shift] proxy spawned but not responding on port ${port} — it may still be starting`,
+        );
+      }
     }
   } catch (err) {
     console.warn(`[shift] proxy failed to start: ${err}`);
@@ -144,19 +169,61 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
 
 /**
  * Probe the SHIFT proxy health endpoint and verify its identity.
- * Returns true only if the response matches the expected service ID,
- * preventing port-squatting by unrelated processes.
+ * Returns both health status and the version reported by the proxy.
  */
-async function isShiftProxyHealthy(port: number): Promise<boolean> {
+async function probeShiftProxy(port: number): Promise<ProxyProbeResult> {
   try {
     const res = await fetch(`http://localhost:${port}/health`, {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    if (!res.ok) return false;
-    const body = (await res.json()) as { service?: string };
-    return body?.service === HEALTH_SERVICE_ID;
+    if (!res.ok) return { healthy: false };
+    const body = (await res.json()) as {
+      service?: string;
+      version?: string;
+    };
+    if (body?.service !== HEALTH_SERVICE_ID) return { healthy: false };
+    return { healthy: true, version: body.version };
   } catch {
-    return false;
+    return { healthy: false };
+  }
+}
+
+/**
+ * Gracefully stop a running SHIFT proxy by sending a request to
+ * an endpoint that triggers shutdown, or by finding and killing
+ * the process listening on the port.
+ */
+async function stopProxy(port: number): Promise<void> {
+  try {
+    // Find the PID of the process listening on the port and kill it.
+    // This works on macOS and Linux.
+    const proc = Bun.spawn(["lsof", "-ti", `tcp:${port}`], {
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const output = await new Response(proc.stdout).text();
+    const pids = output
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((s) => parseInt(s, 10))
+      .filter((n) => !isNaN(n));
+
+    for (const pid of pids) {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        // Process may have already exited
+      }
+    }
+
+    // Wait briefly for the port to free up
+    if (pids.length > 0) {
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+  } catch {
+    // Best-effort — if we can't stop it, the new spawn will fail on port conflict
+    // and the user will see a clear error message.
   }
 }
 
