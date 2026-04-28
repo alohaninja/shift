@@ -25,6 +25,21 @@ describe("proxy server", () => {
     expect(body.service).toBe("@shift-preflight/runtime proxy");
   });
 
+  it("responds to /stats with session stats", async () => {
+    const res = await app.request("/stats");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveProperty("startedAt");
+    expect(body).toHaveProperty("totalRequests");
+    expect(body).toHaveProperty("totalImages");
+    expect(body).toHaveProperty("totalImagesModified");
+    expect(body).toHaveProperty("totalBytesSaved");
+    expect(body).toHaveProperty("tokenSavings");
+    expect(typeof body.totalRequests).toBe("number");
+    expect(body.tokenSavings).toHaveProperty("openai_before");
+    expect(body.tokenSavings).toHaveProperty("anthropic_before");
+  });
+
   it("returns 404 for unknown routes via POST", async () => {
     const res = await app.request("/unknown/endpoint", {
       method: "POST",

@@ -16,6 +16,7 @@ import { createAnthropicHandler } from "./routes/anthropic.js";
 import { createOpenAIHandler } from "./routes/openai.js";
 import { createGoogleHandler } from "./routes/google.js";
 import { createPassthroughHandler } from "./routes/passthrough.js";
+import { getSessionStats } from "../core/stats.js";
 import type { ProxyConfig } from "./types.js";
 
 /**
@@ -30,6 +31,9 @@ export function createProxyApp(config: ProxyConfig = {}): Hono {
   app.get("/health", (c) =>
     c.json({ status: "ok", service: "@shift-preflight/runtime proxy" }),
   );
+
+  // Session stats endpoint
+  app.get("/stats", (c) => c.json(getSessionStats()));
 
   // Anthropic
   app.post("/v1/messages", createAnthropicHandler(config));
