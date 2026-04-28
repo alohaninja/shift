@@ -85,8 +85,8 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
 
   if (probe.healthy) {
     // Proxy is running — check if it's the version we expect.
-    // If the proxy doesn't report a version (pre-0.8.0), treat it as stale
-    // since version-aware health was added in 0.8.0.
+    // If the proxy doesn't report a version, treat it as stale.
+    // Version-aware health was added alongside this plugin change.
     if (probe.version === PACKAGE_VERSION) {
       return {};
     }
@@ -188,26 +188,43 @@ async function probeShiftProxy(port: number): Promise<ProxyProbeResult> {
   }
 }
 
+/** Max time to wait for lsof to complete. */
+const LSOF_TIMEOUT_MS = 5_000;
+
+/** Time to wait after SIGTERM for the port to free up. */
+const KILL_SETTLE_MS = 1_000;
+
 /**
- * Gracefully stop a running SHIFT proxy by sending a request to
- * an endpoint that triggers shutdown, or by finding and killing
- * the process listening on the port.
+ * Gracefully stop a running SHIFT proxy by finding and killing
+ * the listener process on the port.
+ *
+ * Uses `-sTCP:LISTEN` to only match the listening process (not connected
+ * clients) and excludes the current process PID to avoid self-kill.
  */
 async function stopProxy(port: number): Promise<void> {
   try {
-    // Find the PID of the process listening on the port and kill it.
-    // This works on macOS and Linux.
-    const proc = Bun.spawn(["lsof", "-ti", `tcp:${port}`], {
-      stdout: "pipe",
-      stderr: "ignore",
-    });
-    const output = await new Response(proc.stdout).text();
+    // Find the PID of the LISTENING process on the port.
+    // -sTCP:LISTEN filters to listeners only (excludes connected clients
+    // like our own health-check connection that may still be in the fd table).
+    const proc = Bun.spawn(
+      ["lsof", "-ti", `tcp:${port}`, "-sTCP:LISTEN"],
+      { stdout: "pipe", stderr: "ignore" },
+    );
+
+    const output = await Promise.race([
+      new Response(proc.stdout).text(),
+      new Promise<string>((_, reject) =>
+        setTimeout(() => reject(new Error("lsof timeout")), LSOF_TIMEOUT_MS),
+      ),
+    ]);
+
+    const selfPid = process.pid;
     const pids = output
       .trim()
       .split("\n")
       .filter(Boolean)
       .map((s) => parseInt(s, 10))
-      .filter((n) => !isNaN(n));
+      .filter((n) => !isNaN(n) && n !== selfPid);
 
     for (const pid of pids) {
       try {
@@ -219,11 +236,12 @@ async function stopProxy(port: number): Promise<void> {
 
     // Wait briefly for the port to free up
     if (pids.length > 0) {
-      await new Promise((r) => setTimeout(r, 1_000));
+      await new Promise((r) => setTimeout(r, KILL_SETTLE_MS));
     }
   } catch {
-    // Best-effort — if we can't stop it, the new spawn will fail on port conflict
-    // and the user will see a clear error message.
+    // Best-effort — if we can't stop it (lsof missing, timeout, etc.),
+    // the new spawn will fail on port conflict and the user will see
+    // a clear error message.
   }
 }
 

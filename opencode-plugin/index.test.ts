@@ -209,6 +209,10 @@ describe("ShiftProxyPlugin", () => {
       // Should have tried to kill the old process
       expect(killSpy).toHaveBeenCalledWith(12345, "SIGTERM");
 
+      // Verify lsof was called with -sTCP:LISTEN to avoid killing clients
+      const [lsofArgs] = spawnMock.mock.calls[0];
+      expect(lsofArgs).toContain("-sTCP:LISTEN");
+
       // Should have spawned a new proxy
       expect(spawnMock).toHaveBeenCalledTimes(2); // lsof + npx
       const [npxArgs] = spawnMock.mock.calls[1];
@@ -218,7 +222,57 @@ describe("ShiftProxyPlugin", () => {
       killSpy.mockRestore();
     });
 
-    it("treats proxy with no version field as stale (pre-0.8.0)", async () => {
+    it("excludes own PID from kill list", async () => {
+      let fetchCallCount = 0;
+      const fetchMock = mock(() => {
+        fetchCallCount++;
+        if (fetchCallCount === 1) {
+          return Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE_STALE));
+        }
+        return Promise.resolve(jsonResponse(SHIFT_HEALTH_RESPONSE));
+      });
+      globalThis.fetch = fetchMock as any;
+
+      // lsof returns our own PID alongside the proxy PID
+      const selfPid = process.pid;
+      const lsofMockProc = {
+        stdout: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(`${selfPid}\n54321\n`),
+            );
+            controller.close();
+          },
+        }),
+        exited: Promise.resolve(0),
+      };
+
+      const newProxyProc = {
+        unref: mock(() => {}),
+        exited: new Promise<number>(() => {}),
+      };
+
+      let spawnCallCount = 0;
+      const spawnMock = mock((..._args: any[]) => {
+        spawnCallCount++;
+        if (spawnCallCount === 1) return lsofMockProc;
+        return newProxyProc;
+      }) as any;
+      Bun.spawn = spawnMock;
+
+      const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+      const { ShiftProxyPlugin } = await import("./index");
+      await ShiftProxyPlugin(createPluginInput(createMockShell("resolve")));
+
+      // Should only kill the OTHER PID, not our own
+      expect(killSpy).toHaveBeenCalledWith(54321, "SIGTERM");
+      expect(killSpy).not.toHaveBeenCalledWith(selfPid, "SIGTERM");
+
+      killSpy.mockRestore();
+    });
+
+    it("treats proxy with no version field as stale", async () => {
       let fetchCallCount = 0;
       const fetchMock = mock(() => {
         fetchCallCount++;

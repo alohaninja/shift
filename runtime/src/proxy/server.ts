@@ -20,11 +20,16 @@ import { getSessionStats } from "../core/stats.js";
 import type { ProxyConfig } from "./types.js";
 import { createRequire } from "node:module";
 
-/** Read the runtime package version at startup. */
-const require = createRequire(import.meta.url);
-const { version: RUNTIME_VERSION } = require("../../package.json") as {
-  version: string;
-};
+/**
+ * Runtime version, inlined at build time by tsup (see tsup.config.ts `define`).
+ * Falls back to package.json for dev/test (vitest runs against source).
+ */
+declare const __RUNTIME_VERSION__: string | undefined;
+
+const RUNTIME_VERSION: string =
+  typeof __RUNTIME_VERSION__ !== "undefined"
+    ? __RUNTIME_VERSION__
+    : (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
 
 /**
  * Create the Hono application with all proxy routes.

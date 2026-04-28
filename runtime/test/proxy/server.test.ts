@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createProxyApp } from "../../src/proxy/server.js";
+import { version as expectedVersion } from "../../package.json";
 
 // Mock the optimizer so we don't need shift-ai installed
 vi.mock("../../src/core/optimizer.js", () => ({
@@ -23,7 +24,7 @@ describe("proxy server", () => {
     const body = await res.json();
     expect(body.status).toBe("ok");
     expect(body.service).toBe("@shift-preflight/runtime proxy");
-    expect(body.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(body.version).toBe(expectedVersion);
   });
 
   it("responds to /stats with session stats", async () => {
