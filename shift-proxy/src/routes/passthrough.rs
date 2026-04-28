@@ -90,10 +90,7 @@ mod tests {
             detect_provider_from_route("/v1/chat/completions"),
             Some("openai")
         );
-        assert_eq!(
-            detect_provider_from_route("/v1/embeddings"),
-            Some("openai")
-        );
+        assert_eq!(detect_provider_from_route("/v1/embeddings"), Some("openai"));
     }
 
     #[test]

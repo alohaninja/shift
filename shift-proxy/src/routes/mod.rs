@@ -18,19 +18,10 @@ pub fn build_router(state: ProxyState) -> Router {
         .route("/stats", get(health::stats_handler))
         // Provider-specific routes (with optimization)
         .route("/v1/messages", post(anthropic::anthropic_handler))
-        .route(
-            "/v1/chat/completions",
-            post(openai::openai_handler),
-        )
+        .route("/v1/chat/completions", post(openai::openai_handler))
         // Google routes (passthrough only)
-        .route(
-            "/v1beta/models/{*path}",
-            post(google::google_handler),
-        )
-        .route(
-            "/v1/models/{*path}",
-            post(google::google_handler),
-        )
+        .route("/v1beta/models/{*path}", post(google::google_handler))
+        .route("/v1/models/{*path}", post(google::google_handler))
         // Catch-all passthrough for other POST routes
         .fallback(post(passthrough::passthrough_handler))
         .with_state(state)

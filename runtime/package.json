@@ -16,9 +16,6 @@
       "types": "./dist/middleware/index.d.ts"
     }
   },
-  "bin": {
-    "shift-runtime": "./dist/cli.js"
-  },
   "files": [
     "dist",
     "README.md"

@@ -135,10 +135,7 @@ mod tests {
 
         assert!(result.get(header::HOST).is_none());
         assert!(result.get(header::CONTENT_LENGTH).is_none());
-        assert_eq!(
-            result.get(header::AUTHORIZATION).unwrap(),
-            "Bearer sk-test"
-        );
+        assert_eq!(result.get(header::AUTHORIZATION).unwrap(), "Bearer sk-test");
         assert_eq!(result.get("x-api-key").unwrap(), "sk-ant-test");
         assert_eq!(result.get("anthropic-version").unwrap(), "2023-06-01");
     }

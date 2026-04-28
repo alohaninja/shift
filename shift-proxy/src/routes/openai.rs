@@ -32,8 +32,7 @@ pub async fn openai_handler(
             state.session.record(&report);
 
             // Record persistent stats with FULL token savings
-            let record =
-                shift_preflight::stats::record_from_report(&report, "openai", duration_ms);
+            let record = shift_preflight::stats::record_from_report(&report, "openai", duration_ms);
             if let Err(e) = shift_preflight::stats::record_run(&record, None) {
                 tracing::warn!("failed to save stats: {}", e);
             }

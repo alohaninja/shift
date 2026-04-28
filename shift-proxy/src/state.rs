@@ -100,6 +100,12 @@ pub struct TokenSavingsAccum {
     pub anthropic_after: u64,
 }
 
+impl Default for SessionStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionStats {
     pub fn new() -> Self {
         Self {

@@ -5,8 +5,6 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     "middleware/index": "src/middleware/index.ts",
-    "proxy/index": "src/proxy/index.ts",
-    cli: "src/cli.ts",
   },
   format: ["esm"],
   dts: true,

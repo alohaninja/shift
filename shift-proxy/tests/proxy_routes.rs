@@ -274,5 +274,5 @@ async fn health_backward_compatible_with_opencode_plugin() {
 
     // OpenCode plugin checks: body.version exists
     assert!(json.get("version").is_some());
-    assert!(json["version"].as_str().unwrap().len() > 0);
+    assert!(!json["version"].as_str().unwrap().is_empty());
 }
