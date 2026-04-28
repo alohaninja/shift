@@ -44,7 +44,7 @@ On every OpenCode launch:
 3. **Starts the proxy** — spawns the proxy as a detached background process with a sanitized environment (API keys are not passed to the child process).
 4. **Verifies startup** — waits briefly to confirm the proxy is healthy. Logs a warning with bypass instructions if it fails.
 
-Startup verification adds up to ~6s on first launch; subsequent launches detect the running proxy instantly.
+Startup verification adds ~6 seconds on first launch; subsequent launches detect the running proxy instantly.
 
 The `provider.anthropic.options.baseURL` config routes all Anthropic requests through the proxy. The proxy optimizes images, then forwards to the real Anthropic API. Auth headers and SSE streams pass through unchanged.
 
