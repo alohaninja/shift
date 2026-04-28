@@ -18,6 +18,7 @@
   "scripts": {
     "build": "bun build index.ts --outdir dist --target node && tsc --declaration --emitDeclarationOnly --outDir dist",
     "prepublishOnly": "bun run build",
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
