@@ -7,7 +7,11 @@
     "outDir": "dist",
     "declaration": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   },
   "include": ["index.ts"]
 }

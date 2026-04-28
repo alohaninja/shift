@@ -9,7 +9,6 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
-      "require": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
   },
@@ -46,7 +45,7 @@
     "url": "https://github.com/alohaninja/shift/issues"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=0.15.0"
+    "@opencode-ai/plugin": "^0.15.0"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^0.15.0",
