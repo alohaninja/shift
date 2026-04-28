@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/alohaninja/shift/compare/v0.8.0...v0.9.0) (2026-04-28)
+
+
+### Features
+
+* native Rust proxy + universal agent support — eliminate Node.js, fix token tracking ([#31](https://github.com/alohaninja/shift/issues/31)) ([dd72f7a](https://github.com/alohaninja/shift/commit/dd72f7ac2ac283b8b7df5ce9c5f93d97519c2563))
+
 ## [0.8.0](https://github.com/alohaninja/shift/compare/v0.7.1...v0.8.0) (2026-04-28)
 
 
