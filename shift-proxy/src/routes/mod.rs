@@ -33,14 +33,31 @@ async fn messages_fallback_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    // Rewrite /messages → /v1/messages so the Anthropic handler builds the
-    // correct upstream URL (https://api.anthropic.com/v1/messages).
     let query = uri.query().map(|q| format!("?{}", q)).unwrap_or_default();
     let rewritten: Uri = format!("/v1/messages{}", query)
         .parse()
         .expect("/v1/messages is a valid URI");
 
     anthropic::anthropic_handler(state, rewritten, headers, body).await
+}
+
+/// Fallback handler for `POST /responses` (without the `/v1` prefix).
+///
+/// Codex CLI sets `openai_base_url = "http://localhost:8787"` and then sends
+/// requests to `/responses` (the OpenAI Responses API). We rewrite to
+/// `/v1/responses` so the OpenAI handler builds the correct upstream URL.
+async fn responses_fallback_handler(
+    state: State<ProxyState>,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let query = uri.query().map(|q| format!("?{}", q)).unwrap_or_default();
+    let rewritten: Uri = format!("/v1/responses{}", query)
+        .parse()
+        .expect("/v1/responses is a valid URI");
+
+    openai::openai_handler(state, rewritten, headers, body).await
 }
 
 /// Build the complete proxy router with all routes.
@@ -52,8 +69,10 @@ pub fn build_router(state: ProxyState) -> Router {
         // Provider-specific routes (with optimization)
         .route("/v1/messages", post(anthropic::anthropic_handler))
         .route("/v1/chat/completions", post(openai::openai_handler))
-        // Fallback: /messages → /v1/messages (resilience for misconfigured clients)
+        .route("/v1/responses", post(openai::openai_handler))
+        // Fallback: bare paths without /v1 prefix (resilience for misconfigured clients)
         .route("/messages", post(messages_fallback_handler))
+        .route("/responses", post(responses_fallback_handler))
         // Google routes (passthrough only)
         .route("/v1beta/models/{*path}", post(google::google_handler))
         .route("/v1/models/{*path}", post(google::google_handler))
