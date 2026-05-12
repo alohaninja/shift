@@ -185,6 +185,34 @@ describe("ShiftProxyPlugin", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Path 2b: proxy running at NEWER version → keep it (don't downgrade)
+  // -------------------------------------------------------------------------
+  describe("when proxy is running at a newer version", () => {
+    it("returns empty hooks without restarting the proxy", async () => {
+      const NEWER_HEALTH = {
+        status: "ok",
+        service: "@shift-preflight/runtime proxy",
+        version: "99.0.0", // definitely newer than any PACKAGE_VERSION
+      };
+      const fetchMock = mock(() =>
+        Promise.resolve(jsonResponse(NEWER_HEALTH)),
+      );
+      globalThis.fetch = fetchMock as any;
+
+      const { shell, calls } = createTrackingShell();
+
+      const { ShiftProxyPlugin } = await import("./index");
+      const hooks = await ShiftProxyPlugin(createPluginInput(shell));
+
+      expect(hooks).toEqual({});
+      expect(fetchMock).toHaveBeenCalled();
+      // Should NOT call proxy stop or proxy ensure — newer proxy is fine
+      expect(calls.some((c) => c.includes("proxy stop"))).toBe(false);
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Path 3: proxy running at stale version → stop then ensure
   // -------------------------------------------------------------------------
   describe("when proxy is running at a stale version", () => {

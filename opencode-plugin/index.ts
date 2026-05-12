@@ -35,7 +35,7 @@ interface ProxyProbeResult {
  *      "provider": {
  *        "anthropic": {
  *          "options": {
- *            "baseURL": "http://localhost:8787/v1"
+ *            "baseURL": "http://localhost:8787"
  *          }
  *        }
  *      }
@@ -49,7 +49,7 @@ interface ProxyProbeResult {
  * On startup, the plugin:
  * 1. Checks if `shift-ai` is installed — silently skips if not.
  * 2. Probes `localhost:8787/health` — if the SHIFT proxy is already
- *    running **at the expected version**, skips.
+ *    running **at the same or newer version**, skips.
  * 3. If the proxy is running an older version, stops it first.
  * 4. Runs `shift-ai proxy ensure` to start the proxy if needed.
  *
@@ -61,6 +61,19 @@ interface ProxyProbeResult {
  *
  * @see https://github.com/alohaninja/shift
  */
+/**
+ * Returns true if `running` is >= `required` using semver comparison.
+ * Only compares major.minor.patch (pre-release labels are ignored).
+ */
+function isVersionAtLeast(running: string, required: string): boolean {
+  const parse = (v: string) => v.split(".").map(Number);
+  const [rMaj, rMin, rPatch] = parse(running);
+  const [pMaj, pMin, pPatch] = parse(required);
+  if (rMaj !== pMaj) return rMaj > pMaj;
+  if (rMin !== pMin) return rMin > pMin;
+  return rPatch >= pPatch;
+}
+
 export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
   const port = DEFAULT_PORT;
 
@@ -75,12 +88,13 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
   const probe = await probeShiftProxy(port);
 
   if (probe.healthy) {
-    // Proxy is running — check if it's the version we expect.
-    if (probe.version === PACKAGE_VERSION) {
+    // Proxy is running — check if it's at least the version we need.
+    // A newer proxy is fine (don't downgrade); only restart if older.
+    if (probe.version && isVersionAtLeast(probe.version, PACKAGE_VERSION)) {
       return {};
     }
 
-    // Version mismatch — stop the old proxy so we can start the new one.
+    // Running proxy is older or has no version — stop it so we can start ours.
     const old = probe.version ?? "unknown";
     console.log(
       `[shift] proxy version mismatch: running ${old}, expected ${PACKAGE_VERSION} — restarting`,
