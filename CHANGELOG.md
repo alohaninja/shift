@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.5](https://github.com/alohaninja/shift/compare/v0.9.4...v0.9.5) (2026-05-12)
+
+
+### Bug Fixes
+
+* **setup:** fix baseURL, add stale OpenCode plugin cache detection ([#44](https://github.com/alohaninja/shift/issues/44)) ([44b5f40](https://github.com/alohaninja/shift/commit/44b5f40bcde11c45cef96014a8678cc8702711af))
+
 ## [0.9.4](https://github.com/alohaninja/shift/compare/v0.9.3...v0.9.4) (2026-05-12)
 
 
