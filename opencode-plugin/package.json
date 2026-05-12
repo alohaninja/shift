@@ -46,7 +46,7 @@
     "url": "https://github.com/alohaninja/shift/issues"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": "^0.15.0"
+    "@opencode-ai/plugin": ">=0.15.0"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^0.15.0",

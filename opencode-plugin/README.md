@@ -97,6 +97,31 @@ shift-ai gain --daily      # Day-by-day breakdown
 shift-ai gain --format json  # Machine-readable
 ```
 
+## Upgrading
+
+OpenCode caches installed plugin versions. If you need to force an upgrade:
+
+```bash
+# Remove the cached plugin and let OpenCode re-install on next launch
+rm -rf ~/.opencode/plugins/node_modules/@shift-preflight
+```
+
+Then restart OpenCode — it will fetch the latest version from npm.
+
+### Version mismatch behavior
+
+When the plugin starts, it probes the running proxy and compares versions:
+
+| Running proxy | Plugin version | Action |
+|---------------|---------------|--------|
+| Same version | — | Skip (already running) |
+| Newer version | — | Skip (don't downgrade) |
+| Older version | — | Stop old proxy, start new one |
+| No version reported | — | Treat as stale, restart |
+| Not running | — | Start proxy |
+
+This means multiple OpenCode sessions with different plugin versions can coexist safely — the newest proxy always wins.
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -105,6 +130,7 @@ shift-ai gain --format json  # Machine-readable
 | Proxy not starting | Check that `shift-ai` is installed: `which shift-ai` |
 | Requests failing | Ensure `provider.anthropic.options.baseURL` is set to `http://localhost:8787` and the proxy is running |
 | Port 8787 in use | Another process is using the port. Check with `lsof -i :8787` |
+| "Unknown route" error | Your `baseURL` likely has a trailing `/v1` (e.g., `http://localhost:8787/v1`). Remove it — the correct value is `http://localhost:8787`. The Anthropic SDK appends `/v1/messages` automatically. |
 | Want to bypass proxy | Remove the `baseURL` from your provider config, or stop the proxy |
 
 ## License
