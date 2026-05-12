@@ -19,7 +19,11 @@ pub fn print_env(agent: &str, port: Option<u16>) -> Result<()> {
             println!("# SHIFT proxy — OpenCode");
             println!("# Recommended: use the @shift-preflight/opencode-plugin instead.");
             println!("# If configuring manually, add to ~/.config/opencode/opencode.json:");
-            println!("#   \"provider\": {{ \"anthropic\": {{ \"options\": {{ \"baseURL\": \"http://localhost:{}\" }} }} }}", port);
+            println!("#   \"provider\": {{ \"anthropic\": {{ \"options\": {{ \"baseURL\": \"http://localhost:{}/v1\" }} }} }}", port);
+            println!("#");
+            println!("# NOTE: OpenCode's Anthropic client appends only /messages to the");
+            println!("# baseURL, so /v1 MUST be included. Other agents (Claude Code, Codex)");
+            println!("# use SDKs that append /v1/messages, so they do NOT include /v1.");
         }
         "claude" | "claude-code" => {
             println!("# SHIFT proxy — Claude Code");
@@ -102,7 +106,10 @@ pub fn print_agent_list(port: Option<u16>) -> Result<()> {
         "{:<16}{:<26}{codex_val}",
         "Codex CLI", "~/.codex/config.toml"
     );
-    println!("{:<16}{:<26}{base}", "OpenCode", "opencode-plugin (auto)");
+    println!(
+        "{:<16}{:<26}{base}/v1",
+        "OpenCode", "opencode-plugin (auto)"
+    );
     println!("{:<16}{:<26}{base_v1}", "Cursor", "Settings UI (manual)");
     println!();
     println!("Claude Code:  eval \"$(shift-ai env claude-code)\"");

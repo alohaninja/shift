@@ -232,7 +232,10 @@ fn configure_opencode_at(config_path: &Path, port: u16) -> Result<bool> {
         .or_insert_with(|| serde_json::json!({}));
 
     if let Some(opts) = options.as_object_mut() {
-        let url = format!("http://localhost:{}", port);
+        // OpenCode's Anthropic client uses baseURL as the full prefix and
+        // appends only `/messages` (NOT `/v1/messages`).  Therefore we must
+        // include `/v1` here so the final URL becomes `…/v1/messages`.
+        let url = format!("http://localhost:{}/v1", port);
         opts.insert("baseURL".to_string(), serde_json::Value::String(url));
     }
 
@@ -636,11 +639,16 @@ mod tests {
         let base_url = config["provider"]["anthropic"]["options"]["baseURL"]
             .as_str()
             .unwrap();
-        assert_eq!(base_url, "http://localhost:8787");
-        // Must NOT contain /v1
+        assert_eq!(base_url, "http://localhost:8787/v1");
+        // OpenCode appends only `/messages`, so baseURL MUST include `/v1`.
         assert!(
-            !base_url.contains("/v1"),
-            "baseURL should not contain /v1, got: {}",
+            base_url.ends_with("/v1"),
+            "OpenCode baseURL must include /v1, got: {}",
+            base_url
+        );
+        assert!(
+            !base_url.ends_with("/v1/v1"),
+            "must not have double /v1, got: {}",
             base_url
         );
 
