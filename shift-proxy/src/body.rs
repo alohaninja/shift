@@ -1,15 +1,22 @@
 //! Request body extraction with transparent decompression.
 //!
-//! Clients like Codex CLI send gzip-compressed request bodies with
-//! `Content-Encoding: gzip`. Axum's `String` extractor rejects these
-//! because raw gzip bytes aren't valid UTF-8. This module extracts the
-//! raw `Bytes`, decompresses if needed, and converts to a UTF-8 string.
+//! Clients like Codex CLI send compressed request bodies (gzip or zstd).
+//! Axum's `String` extractor rejects these because raw compressed bytes
+//! aren't valid UTF-8. This module extracts the raw `Bytes`, decompresses
+//! if needed, and converts to a UTF-8 string.
 
 use axum::body::Bytes;
 use axum::http::HeaderMap;
 use flate2::read::GzDecoder;
 use std::io::Read;
 use zstd::stream::read::Decoder as ZstdDecoder;
+
+/// Maximum decompressed body size: 512 MB.
+///
+/// The `DefaultBodyLimit` in `mod.rs` caps the *compressed* input at 200 MB,
+/// but a crafted gzip/zstd payload can expand ~1000x. This limit caps the
+/// *decompressed* output to prevent memory exhaustion.
+const MAX_DECOMPRESSED_SIZE: u64 = 512 * 1024 * 1024;
 
 /// Extract the request body as a UTF-8 string, decompressing if the
 /// `Content-Encoding` header indicates compression.
@@ -19,34 +26,36 @@ use zstd::stream::read::Decoder as ZstdDecoder;
 /// - `zstd` — decompressed via the zstd crate (used by Codex CLI)
 /// - (none / identity) — passed through as-is
 ///
-/// Also sniffs gzip (0x1f 0x8b) and zstd (0x28 0xb5 0x2f 0xfd) magic bytes
-/// as a fallback when the Content-Encoding header is absent.
+/// When no `Content-Encoding` header is present, sniffs gzip (0x1f 0x8b)
+/// and zstd (0x28 0xb5 0x2f 0xfd) magic bytes as a fallback.
 pub fn extract_body(headers: &HeaderMap, raw: Bytes) -> Result<String, String> {
     let encoding = headers
         .get("content-encoding")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    // Detect compression via header OR magic bytes.
+    // Detect compression via header first, then magic bytes only when
+    // no Content-Encoding header is set.
+    let no_encoding = encoding.is_empty();
     let has_gzip_magic = raw.len() >= 2 && raw[0] == 0x1f && raw[1] == 0x8b;
     let has_zstd_magic =
         raw.len() >= 4 && raw[0] == 0x28 && raw[1] == 0xb5 && raw[2] == 0x2f && raw[3] == 0xfd;
 
-    let is_gzip = encoding.eq_ignore_ascii_case("gzip") || has_gzip_magic;
-    let is_zstd = encoding.eq_ignore_ascii_case("zstd") || has_zstd_magic;
+    let is_gzip = encoding.eq_ignore_ascii_case("gzip") || (no_encoding && has_gzip_magic);
+    let is_zstd = encoding.eq_ignore_ascii_case("zstd") || (no_encoding && has_zstd_magic);
 
     let bytes = if is_gzip {
-        let mut decoder = GzDecoder::new(&raw[..]);
         let mut decoded = Vec::new();
-        decoder
+        GzDecoder::new(&raw[..])
+            .take(MAX_DECOMPRESSED_SIZE)
             .read_to_end(&mut decoded)
             .map_err(|e| format!("gzip decode error: {e}"))?;
         decoded
     } else if is_zstd {
-        let mut decoder =
-            ZstdDecoder::new(&raw[..]).map_err(|e| format!("zstd init error: {e}"))?;
         let mut decoded = Vec::new();
-        decoder
+        ZstdDecoder::new(&raw[..])
+            .map_err(|e| format!("zstd init error: {e}"))?
+            .take(MAX_DECOMPRESSED_SIZE)
             .read_to_end(&mut decoded)
             .map_err(|e| format!("zstd decode error: {e}"))?;
         decoded
@@ -148,6 +157,23 @@ mod tests {
         let headers = HeaderMap::new();
         let result = extract_body(&headers, Bytes::from(compressed)).unwrap();
         assert_eq!(result, original);
+    }
+
+    #[test]
+    fn test_magic_bytes_ignored_when_encoding_header_set() {
+        // If Content-Encoding is explicitly set to something unsupported,
+        // magic byte sniffing should NOT fire — respect the header.
+        let original = r#"{"test": true}"#;
+        let compressed = zstd::encode_all(original.as_bytes(), 3).unwrap();
+
+        // Set a bogus Content-Encoding — magic bytes should NOT trigger zstd
+        let mut headers = HeaderMap::new();
+        headers.insert("content-encoding", "br".parse().unwrap());
+
+        let result = extract_body(&headers, Bytes::from(compressed));
+        // Should fail as invalid UTF-8 because brotli isn't supported and
+        // magic byte fallback is disabled when a header is present
+        assert!(result.is_err());
     }
 
     #[test]

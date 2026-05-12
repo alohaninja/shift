@@ -669,3 +669,149 @@ async fn anthropic_gzip_request_body() {
     assert_eq!(forwarded_body["model"], "claude-sonnet-4-20250514");
     assert_eq!(forwarded_body["messages"][0]["content"], "gzip test");
 }
+
+// ── Responses API routes (Codex CLI) ────────────────────────────────
+
+#[tokio::test]
+async fn responses_route_forwards_to_openai() {
+    let (mock_url, mock_state) = start_mock_upstream().await;
+    let app = create_app(test_config_with_mock(&mock_url));
+
+    let payload = serde_json::json!({
+        "model": "gpt-5.4",
+        "input": "say five words"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer sk-test")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+
+    assert_eq!(json["path"], "/v1/responses");
+    assert_eq!(json["method"], "POST");
+    assert_eq!(json["headers"]["authorization"], "Bearer sk-test");
+
+    let forwarded_body: serde_json::Value =
+        serde_json::from_str(json["body"].as_str().unwrap()).unwrap();
+    assert_eq!(forwarded_body["model"], "gpt-5.4");
+    assert_eq!(forwarded_body["input"], "say five words");
+
+    assert_eq!(mock_state.request_count.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn bare_responses_route_rewrites_to_v1() {
+    // Codex CLI sets openai_base_url = "http://localhost:8787" (no /v1),
+    // so it hits /responses. The proxy rewrites to /v1/responses.
+    let (mock_url, mock_state) = start_mock_upstream().await;
+    let app = create_app(test_config_with_mock(&mock_url));
+
+    let payload = serde_json::json!({
+        "model": "gpt-5.4",
+        "input": "test"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/responses")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer sk-test")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+
+    // The mock should see /v1/responses (rewritten from /responses)
+    assert_eq!(json["path"], "/v1/responses");
+    assert_eq!(mock_state.request_count.load(Ordering::Relaxed), 1);
+}
+
+// ── Zstd request body ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn openai_zstd_request_body() {
+    // Codex CLI sends zstd-compressed request bodies.
+    let (mock_url, mock_state) = start_mock_upstream().await;
+    let app = create_app(test_config_with_mock(&mock_url));
+
+    let payload = r#"{"model":"gpt-5.4","input":"hello from zstd"}"#;
+    let compressed = zstd::encode_all(payload.as_bytes(), 3).unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .header("content-type", "application/json")
+                .header("content-encoding", "zstd")
+                .header("authorization", "Bearer sk-test")
+                .body(Body::from(compressed))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+
+    let forwarded_body: serde_json::Value =
+        serde_json::from_str(json["body"].as_str().unwrap()).unwrap();
+    assert_eq!(forwarded_body["model"], "gpt-5.4");
+    assert_eq!(forwarded_body["input"], "hello from zstd");
+
+    // content-encoding should be stripped from the forwarded request
+    assert!(
+        json["headers"].get("content-encoding").is_none()
+            || json["headers"]["content-encoding"] == "",
+        "content-encoding should be stripped from the forwarded request"
+    );
+
+    assert_eq!(mock_state.request_count.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn zstd_request_body_without_header() {
+    // Magic byte detection: zstd body without Content-Encoding header.
+    let (mock_url, _) = start_mock_upstream().await;
+    let app = create_app(test_config_with_mock(&mock_url));
+
+    let payload = r#"{"model":"gpt-5.4","messages":[{"role":"user","content":"zstd magic"}]}"#;
+    let compressed = zstd::encode_all(payload.as_bytes(), 3).unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer sk-test")
+                .body(Body::from(compressed))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+
+    let forwarded_body: serde_json::Value =
+        serde_json::from_str(json["body"].as_str().unwrap()).unwrap();
+    assert_eq!(forwarded_body["messages"][0]["content"], "zstd magic");
+}
