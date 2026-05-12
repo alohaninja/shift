@@ -213,6 +213,71 @@ describe("ShiftProxyPlugin", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Path 2c: isVersionAtLeast edge cases via integration
+  // -------------------------------------------------------------------------
+  describe("version comparison edge cases", () => {
+    /** Helper: probe returns given version, assert whether proxy was kept or restarted. */
+    async function expectVersionKept(version: string, shouldKeep: boolean) {
+      const health = {
+        status: "ok",
+        service: "@shift-preflight/runtime proxy",
+        version,
+      };
+      const fetchMock = mock(() =>
+        Promise.resolve(jsonResponse(health)),
+      );
+      globalThis.fetch = fetchMock as any;
+
+      const { shell, calls } = createTrackingShell();
+
+      const { ShiftProxyPlugin } = await import("./index");
+      await ShiftProxyPlugin(createPluginInput(shell));
+
+      const restarted = calls.some((c) => c.includes("proxy stop"));
+      if (shouldKeep) {
+        expect(restarted).toBe(false);
+      } else {
+        expect(restarted).toBe(true);
+      }
+    }
+
+    it("keeps proxy at same version", async () => {
+      await expectVersionKept(PACKAGE_VERSION, true);
+    });
+
+    it("keeps proxy at newer patch", async () => {
+      // PACKAGE_VERSION is 0.9.3 — 0.9.4 is newer patch
+      await expectVersionKept("0.9.4", true);
+    });
+
+    it("keeps proxy at newer minor", async () => {
+      await expectVersionKept("0.10.0", true);
+    });
+
+    it("keeps proxy at newer major", async () => {
+      await expectVersionKept("1.0.0", true);
+    });
+
+    it("restarts proxy at older patch", async () => {
+      await expectVersionKept("0.9.2", false);
+    });
+
+    it("restarts proxy at older minor", async () => {
+      await expectVersionKept("0.8.0", false);
+    });
+
+    it("strips pre-release suffix and keeps newer base version", async () => {
+      // 0.10.0-rc.1 → stripped to 0.10.0 which is > 0.9.3
+      await expectVersionKept("0.10.0-rc.1", true);
+    });
+
+    it("strips pre-release suffix and keeps equal base version", async () => {
+      // 0.9.3-beta.1 → stripped to 0.9.3 which equals PACKAGE_VERSION
+      await expectVersionKept(`${PACKAGE_VERSION}-beta.1`, true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Path 3: proxy running at stale version → stop then ensure
   // -------------------------------------------------------------------------
   describe("when proxy is running at a stale version", () => {

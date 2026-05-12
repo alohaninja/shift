@@ -61,14 +61,17 @@ interface ProxyProbeResult {
  *
  * @see https://github.com/alohaninja/shift
  */
+
 /**
  * Returns true if `running` is >= `required` using semver comparison.
- * Only compares major.minor.patch (pre-release labels are ignored).
+ * Only compares major.minor.patch — pre-release suffixes (e.g. `-beta.1`)
+ * are stripped before comparison so `1.0.0-rc.1` is treated as `1.0.0`.
  */
 function isVersionAtLeast(running: string, required: string): boolean {
-  const parse = (v: string) => v.split(".").map(Number);
-  const [rMaj, rMin, rPatch] = parse(running);
-  const [pMaj, pMin, pPatch] = parse(required);
+  const parse = (v: string) =>
+    v.replace(/-.*$/, "").split(".").map(Number);
+  const [rMaj = 0, rMin = 0, rPatch = 0] = parse(running);
+  const [pMaj = 0, pMin = 0, pPatch = 0] = parse(required);
   if (rMaj !== pMaj) return rMaj > pMaj;
   if (rMin !== pMin) return rMin > pMin;
   return rPatch >= pPatch;
@@ -113,8 +116,9 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
 
     const postProbe = await probeShiftProxy(port);
     if (postProbe.healthy) {
+      const runningVersion = postProbe.version ?? PACKAGE_VERSION;
       console.log(
-        `[shift] proxy v${PACKAGE_VERSION} started on port ${port}`,
+        `[shift] proxy v${runningVersion} started on port ${port}`,
       );
     } else {
       console.warn(
