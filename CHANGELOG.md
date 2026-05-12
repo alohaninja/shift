@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.7](https://github.com/alohaninja/shift/compare/v0.9.6...v0.9.7) (2026-05-12)
+
+
+### Bug Fixes
+
+* **proxy:** enable gzip decompression + HTTP/2 (h2c) for SSE streaming ([#52](https://github.com/alohaninja/shift/issues/52)) ([fd16839](https://github.com/alohaninja/shift/commit/fd16839f48fa93d6abae5cda63b5bc9d13c813df))
+
 ## [0.9.6](https://github.com/alohaninja/shift/compare/v0.9.5...v0.9.6) (2026-05-12)
 
 
