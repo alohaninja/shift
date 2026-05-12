@@ -7,6 +7,7 @@ pub mod openai;
 pub mod passthrough;
 
 use crate::ProxyState;
+use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
 use axum::http::{HeaderMap, Uri};
@@ -30,7 +31,7 @@ async fn messages_fallback_handler(
     state: State<ProxyState>,
     uri: Uri,
     headers: HeaderMap,
-    body: String,
+    body: Bytes,
 ) -> Response {
     // Rewrite /messages → /v1/messages so the Anthropic handler builds the
     // correct upstream URL (https://api.anthropic.com/v1/messages).

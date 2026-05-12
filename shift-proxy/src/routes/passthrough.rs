@@ -5,8 +5,10 @@
 //! handlers (e.g., OpenAI batch endpoints, Anthropic beta paths, GET
 //! /v1/models, etc.).
 
+use crate::body::extract_body;
 use crate::forward::forward_request;
 use crate::ProxyState;
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
@@ -18,8 +20,18 @@ pub async fn passthrough_handler(
     method: Method,
     uri: Uri,
     headers: HeaderMap,
-    body: String,
+    body: Bytes,
 ) -> Response {
+    let body = match extract_body(&headers, body) {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
     let path = uri.path();
     let provider = detect_provider_from_route(path);
 

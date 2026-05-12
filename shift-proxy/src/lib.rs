@@ -16,6 +16,7 @@
 //!   └── POST /*                   → Auto-detect provider (passthrough)
 //! ```
 
+pub mod body;
 pub mod forward;
 pub mod optimize;
 pub mod routes;

@@ -585,3 +585,87 @@ async fn go_client_accept_encoding_gzip_gets_readable_response() {
         &body_str[..body_str.len().min(200)]
     );
 }
+
+// ── Gzip request body ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn openai_gzip_request_body() {
+    // Codex CLI sends gzip-compressed request bodies with Content-Encoding: gzip.
+    // The proxy must decompress and forward the decompressed JSON to upstream.
+    let (mock_url, mock_state) = start_mock_upstream().await;
+    let app = create_app(test_config_with_mock(&mock_url));
+
+    let payload = r#"{"model":"gpt-4o","messages":[{"role":"user","content":"hello from gzip"}]}"#;
+
+    // Gzip-compress the payload
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(payload.as_bytes()).unwrap();
+    let compressed = encoder.finish().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .header("content-encoding", "gzip")
+                .header("authorization", "Bearer sk-test")
+                .body(Body::from(compressed))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+
+    // Verify the mock received the decompressed body
+    let forwarded_body: serde_json::Value =
+        serde_json::from_str(json["body"].as_str().unwrap()).unwrap();
+    assert_eq!(forwarded_body["model"], "gpt-4o");
+    assert_eq!(forwarded_body["messages"][0]["content"], "hello from gzip");
+
+    // Verify content-encoding was stripped from the forwarded request
+    assert!(
+        json["headers"].get("content-encoding").is_none()
+            || json["headers"]["content-encoding"] == "",
+        "content-encoding should be stripped from the forwarded request"
+    );
+
+    assert_eq!(mock_state.request_count.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn anthropic_gzip_request_body() {
+    let (mock_url, _) = start_mock_upstream().await;
+    let app = create_app(test_config_with_mock(&mock_url));
+
+    let payload = r#"{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"gzip test"}]}"#;
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(payload.as_bytes()).unwrap();
+    let compressed = encoder.finish().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .header("content-encoding", "gzip")
+                .header("x-api-key", "sk-ant-test")
+                .header("anthropic-version", "2023-06-01")
+                .body(Body::from(compressed))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+
+    let forwarded_body: serde_json::Value =
+        serde_json::from_str(json["body"].as_str().unwrap()).unwrap();
+    assert_eq!(forwarded_body["model"], "claude-sonnet-4-20250514");
+    assert_eq!(forwarded_body["messages"][0]["content"], "gzip test");
+}

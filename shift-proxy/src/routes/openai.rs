@@ -7,20 +7,32 @@
 //! The CPU-intensive optimization runs on a blocking thread to avoid
 //! starving the tokio event loop.
 
+use crate::body::extract_body;
 use crate::forward::forward_request;
 use crate::optimize::optimize_payload;
 use crate::ProxyState;
+use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{HeaderMap, Uri};
-use axum::response::Response;
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
 
 /// POST /v1/chat/completions — optimize and forward to OpenAI.
 pub async fn openai_handler(
     State(state): State<ProxyState>,
     uri: Uri,
     headers: HeaderMap,
-    body: String,
+    body: Bytes,
 ) -> Response {
+    let body = match extract_body(&headers, body) {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
     let config = state.config.shift_config("openai");
     let base_url = &state.config.providers.openai;
     let query = uri.query().map(|q| format!("?{}", q)).unwrap_or_default();

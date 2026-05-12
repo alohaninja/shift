@@ -37,7 +37,15 @@ const STRIP_RESPONSE_HEADERS: &[&str] = &[
 ///   header could request encodings reqwest can't decompress (e.g., `zstd`), which
 ///   would result in raw compressed bytes reaching the client after we strip
 ///   `content-encoding`.
-const STRIP_REQUEST_HEADERS: &[&str] = &["host", "content-length", "accept-encoding"];
+/// - `content-encoding`: the proxy already decompressed the request body (see
+///   `body::extract_body`), so telling the upstream it's still compressed would
+///   cause a decode error on their end.
+const STRIP_REQUEST_HEADERS: &[&str] = &[
+    "host",
+    "content-length",
+    "accept-encoding",
+    "content-encoding",
+];
 
 /// Forward a request to an upstream URL, streaming the response back.
 ///
@@ -138,6 +146,7 @@ mod tests {
         headers.insert(header::HOST, "example.com".parse().unwrap());
         headers.insert(header::CONTENT_LENGTH, "42".parse().unwrap());
         headers.insert(header::ACCEPT_ENCODING, "gzip, br".parse().unwrap());
+        headers.insert(header::CONTENT_ENCODING, "gzip".parse().unwrap());
         headers.insert(header::AUTHORIZATION, "Bearer sk-test".parse().unwrap());
         headers.insert("x-api-key", "sk-ant-test".parse().unwrap());
         headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
@@ -149,6 +158,10 @@ mod tests {
         assert!(
             result.get(header::ACCEPT_ENCODING).is_none(),
             "accept-encoding should be stripped so reqwest negotiates its own"
+        );
+        assert!(
+            result.get(header::CONTENT_ENCODING).is_none(),
+            "content-encoding should be stripped — body was already decompressed"
         );
         assert_eq!(result.get(header::AUTHORIZATION).unwrap(), "Bearer sk-test");
         assert_eq!(result.get("x-api-key").unwrap(), "sk-ant-test");
