@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.8](https://github.com/alohaninja/shift/compare/v0.9.7...v0.9.8) (2026-05-12)
+
+
+### Bug Fixes
+
+* **proxy:** handle compressed request bodies and Responses API for Codex CLI ([#54](https://github.com/alohaninja/shift/issues/54)) ([92868fc](https://github.com/alohaninja/shift/commit/92868fc73f30fb0f9499d7c98e8506d5f0ef2ee5))
+
 ## [0.9.7](https://github.com/alohaninja/shift/compare/v0.9.6...v0.9.7) (2026-05-12)
 
 
