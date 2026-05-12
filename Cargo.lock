@@ -1551,7 +1551,7 @@ dependencies = [
 
 [[package]]
 name = "shift-preflight"
-version = "0.8.0"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "base64",
@@ -1567,7 +1567,7 @@ dependencies = [
 
 [[package]]
 name = "shift-preflight-cli"
-version = "0.8.0"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -1577,13 +1577,14 @@ dependencies = [
  "serde_json",
  "shift-preflight",
  "shift-proxy",
+ "tempfile",
  "tokio",
  "ureq",
 ]
 
 [[package]]
 name = "shift-proxy"
-version = "0.8.0"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "axum",

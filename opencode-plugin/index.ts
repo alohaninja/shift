@@ -35,7 +35,7 @@ interface ProxyProbeResult {
  *      "provider": {
  *        "anthropic": {
  *          "options": {
- *            "baseURL": "http://localhost:8787"
+ *            "baseURL": "http://localhost:8787/v1"
  *          }
  *        }
  *      }
@@ -55,8 +55,8 @@ interface ProxyProbeResult {
  *
  * The proxy is shared across sessions. Other agents can also use it:
  * ```bash
- * ANTHROPIC_BASE_URL=http://localhost:8787 claude   # Claude Code
- * OPENAI_BASE_URL=http://localhost:8787 codex       # Codex CLI
+ * ANTHROPIC_BASE_URL=http://localhost:8787 claude   # Claude Code (no /v1 — SDK appends it)
+ * # Codex CLI — add to ~/.codex/config.toml: openai_base_url = "http://localhost:8787"
  * ```
  *
  * @see https://github.com/alohaninja/shift

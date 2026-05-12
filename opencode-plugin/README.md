@@ -26,7 +26,7 @@ Add the plugin to your `opencode.json`:
   "provider": {
     "anthropic": {
       "options": {
-        "baseURL": "http://localhost:8787"
+        "baseURL": "http://localhost:8787/v1"
       }
     }
   }
@@ -46,18 +46,19 @@ On every OpenCode launch:
 
 Startup verification adds ~6 seconds on first launch; subsequent launches detect the running proxy instantly.
 
-The `provider.anthropic.options.baseURL` config routes all Anthropic requests through the proxy. The proxy optimizes images, then forwards to the real Anthropic API. Auth headers and SSE streams pass through unchanged.
+The `provider.anthropic.options.baseURL` config routes all Anthropic requests through the proxy. Note: OpenCode's Anthropic client appends only `/messages` (not `/v1/messages`) to the base URL, which is why `/v1` must be included in the `baseURL`. The proxy optimizes images, then forwards to the real Anthropic API. Auth headers and SSE streams pass through unchanged.
 
 ## Sharing with other agents
 
 The proxy runs on `localhost:8787` and can be shared with any agent that supports a custom base URL:
 
 ```bash
-# Claude Code
+# Claude Code (no /v1 — the Anthropic SDK appends /v1/messages)
 ANTHROPIC_BASE_URL=http://localhost:8787 claude
 
-# Codex CLI
-OPENAI_BASE_URL=http://localhost:8787 codex
+# Codex CLI — add to ~/.codex/config.toml:
+# openai_base_url = "http://localhost:8787"
+codex
 
 # Gemini CLI (check Gemini CLI docs for the correct env var)
 # GEMINI_API_BASE=http://localhost:8787 gemini
@@ -84,6 +85,7 @@ npx @shift-preflight/runtime proxy --port 8787 --mode economy
 | Route | Provider |
 |-------|----------|
 | `POST /v1/messages` | Anthropic |
+| `POST /messages` | Anthropic (fallback — rewrites to `/v1/messages`) |
 | `POST /v1/chat/completions` | OpenAI |
 | `POST /v1beta/models/*` | Google (passthrough only — no image optimization yet) |
 
@@ -99,11 +101,13 @@ shift-ai gain --format json  # Machine-readable
 
 ## Upgrading
 
-OpenCode caches installed plugin versions. If you need to force an upgrade:
+OpenCode caches npm plugins at `~/.cache/opencode/packages/` and does not automatically check for newer versions. Running `shift-ai setup` will detect and clear stale caches automatically.
+
+To force an upgrade manually:
 
 ```bash
 # Remove the cached plugin and let OpenCode re-install on next launch
-rm -rf ~/.opencode/plugins/node_modules/@shift-preflight
+rm -rf ~/.cache/opencode/packages/@shift-preflight*
 ```
 
 Then restart OpenCode — it will fetch the latest version from npm.
@@ -128,9 +132,10 @@ This means multiple OpenCode sessions with different plugin versions can coexist
 |---------|-----|
 | Plugin not loading | Verify `"plugin": ["@shift-preflight/opencode-plugin"]` is in your `opencode.json` |
 | Proxy not starting | Check that `shift-ai` is installed: `which shift-ai` |
-| Requests failing | Ensure `provider.anthropic.options.baseURL` is set to `http://localhost:8787` and the proxy is running |
+| Requests failing | Ensure `provider.anthropic.options.baseURL` is set to `http://localhost:8787/v1` and the proxy is running |
+| Plugin not updating | OpenCode caches plugins and doesn't auto-update. Run `shift-ai setup` to detect and clear stale caches, or manually: `rm -rf ~/.cache/opencode/packages/@shift-preflight*` |
 | Port 8787 in use | Another process is using the port. Check with `lsof -i :8787` |
-| "Unknown route" error | Your `baseURL` likely has a trailing `/v1` (e.g., `http://localhost:8787/v1`). Remove it — the correct value is `http://localhost:8787`. The Anthropic SDK appends `/v1/messages` automatically. |
+| "Unknown route" error | Your `baseURL` is likely missing the `/v1` suffix. The correct value for OpenCode is `http://localhost:8787/v1`. OpenCode's Anthropic client appends only `/messages` to the base URL, so `/v1` must be included. |
 | Want to bypass proxy | Remove the `baseURL` from your provider config, or stop the proxy |
 
 ## License

@@ -61,7 +61,7 @@ pub async fn passthrough_handler(
 
 /// Detect which provider a route path belongs to.
 fn detect_provider_from_route(path: &str) -> Option<&'static str> {
-    if path.starts_with("/v1/messages") {
+    if path.starts_with("/v1/messages") || path == "/messages" {
         Some("anthropic")
     } else if path.starts_with("/v1/chat/") || path.starts_with("/v1/embeddings") {
         Some("openai")
@@ -89,6 +89,8 @@ mod tests {
             detect_provider_from_route("/v1/messages/batches"),
             Some("anthropic")
         );
+        // Bare /messages (without /v1 prefix) should also route to Anthropic
+        assert_eq!(detect_provider_from_route("/messages"), Some("anthropic"));
     }
 
     #[test]

@@ -8,6 +8,7 @@
 //! Client (OpenCode, Claude Code, Codex, etc.)
 //!   │
 //!   ├── POST /v1/messages         → Anthropic (optimize + forward)
+//!   ├── POST /messages            → Anthropic (rewrite → /v1/messages)
 //!   ├── POST /v1/chat/completions → OpenAI   (optimize + forward)
 //!   ├── POST /v1beta/models/*     → Google   (passthrough)
 //!   ├── GET  /health              → Status

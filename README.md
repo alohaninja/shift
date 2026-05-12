@@ -133,9 +133,8 @@ const model = wrapLanguageModel({
 npx @shift-preflight/runtime proxy --port 8787 --mode balanced
 
 # Point any agent at the proxy:
-export ANTHROPIC_BASE_URL=http://localhost:8787   # Claude Code
-export OPENAI_BASE_URL=http://localhost:8787       # Codex CLI
-export GEMINI_API_BASE=http://localhost:8787        # Gemini CLI
+export ANTHROPIC_BASE_URL=http://localhost:8787   # Claude Code (no /v1 — SDK appends it)
+# Codex CLI — add to ~/.codex/config.toml: openai_base_url = "http://localhost:8787"
 ```
 
 See [`runtime/README.md`](runtime/README.md) for full documentation.
@@ -148,7 +147,7 @@ See [`runtime/README.md`](runtime/README.md) for full documentation.
   "provider": {
     "anthropic": {
       "options": {
-        "baseURL": "http://localhost:8787"
+        "baseURL": "http://localhost:8787/v1"
       }
     }
   }
