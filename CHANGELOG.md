@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.6](https://github.com/alohaninja/shift/compare/v0.9.5...v0.9.6) (2026-05-12)
+
+
+### Bug Fixes
+
+* **opencode-plugin:** use relative versions in tests to prevent release breakage ([#48](https://github.com/alohaninja/shift/issues/48)) ([46ce6c1](https://github.com/alohaninja/shift/commit/46ce6c116524d493944b24ed163ad7b00e776e52))
+
 ## [0.9.5](https://github.com/alohaninja/shift/compare/v0.9.4...v0.9.5) (2026-05-12)
 
 
