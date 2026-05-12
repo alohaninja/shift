@@ -12,7 +12,7 @@
 
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const DEFAULT_PORT: u16 = 8787;
@@ -202,16 +202,15 @@ fn configure_claude_code(port: u16) -> Result<bool> {
     Ok(true)
 }
 
-/// Configure OpenCode by updating opencode.json.
-fn configure_opencode(port: u16) -> Result<bool> {
-    let home = std::env::var("HOME").context("HOME not set")?;
-    let config_path = PathBuf::from(&home).join(".config/opencode/opencode.json");
-
+/// Configure OpenCode by updating opencode.json at a specific path.
+/// Returns `Ok(true)` if configuration was written, `Ok(false)` if the
+/// config file does not exist.
+fn configure_opencode_at(config_path: &Path, port: u16) -> Result<bool> {
     if !config_path.exists() {
         return Ok(false);
     }
 
-    let content = fs::read_to_string(&config_path)?;
+    let content = fs::read_to_string(config_path)?;
     let mut config: serde_json::Value =
         serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}));
 
@@ -233,7 +232,7 @@ fn configure_opencode(port: u16) -> Result<bool> {
         .or_insert_with(|| serde_json::json!({}));
 
     if let Some(opts) = options.as_object_mut() {
-        let url = format!("http://localhost:{}/v1", port);
+        let url = format!("http://localhost:{}", port);
         opts.insert("baseURL".to_string(), serde_json::Value::String(url));
     }
 
@@ -251,8 +250,15 @@ fn configure_opencode(port: u16) -> Result<bool> {
     }
 
     let output = serde_json::to_string_pretty(&config)?;
-    fs::write(&config_path, output)?;
+    fs::write(config_path, output)?;
     Ok(true)
+}
+
+/// Configure OpenCode by updating ~/.config/opencode/opencode.json.
+fn configure_opencode(port: u16) -> Result<bool> {
+    let home = std::env::var("HOME").context("HOME not set")?;
+    let config_path = PathBuf::from(&home).join(".config/opencode/opencode.json");
+    configure_opencode_at(&config_path, port)
 }
 
 /// Configure Codex CLI by writing/updating ~/.codex/config.toml.
@@ -294,6 +300,74 @@ fn configure_codex(port: u16) -> Result<bool> {
     }
 
     Ok(true)
+}
+
+// ── Stale OpenCode plugin cache detection ────────────────────────────
+
+/// Compare two semver strings. Returns true if `cached` is older than `current`.
+fn is_older_semver(cached: &str, current: &str) -> bool {
+    let parse = |s: &str| -> Option<(u64, u64, u64)> {
+        let parts: Vec<&str> = s.trim().trim_start_matches('v').split('.').collect();
+        if parts.len() != 3 {
+            return None;
+        }
+        Some((
+            parts[0].parse().ok()?,
+            parts[1].parse().ok()?,
+            parts[2].parse().ok()?,
+        ))
+    };
+
+    match (parse(cached), parse(current)) {
+        (Some(c), Some(cur)) => c < cur,
+        _ => false,
+    }
+}
+
+/// Check for a stale OpenCode plugin cache at a specific directory.
+///
+/// If a cached `package.json` exists under `cache_dir` with a version older
+/// than the CLI's own version, the cache directory is deleted.
+///
+/// Returns `Some(old_version)` if a stale cache was cleared, `None` otherwise.
+pub fn check_and_clear_stale_opencode_cache_at(cache_dir: &Path) -> Result<Option<String>> {
+    let pkg_json = cache_dir.join("node_modules/@shift-preflight/opencode-plugin/package.json");
+
+    if !pkg_json.exists() {
+        return Ok(None);
+    }
+
+    let content =
+        fs::read_to_string(&pkg_json).context("failed to read cached plugin package.json")?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&content).context("failed to parse cached plugin package.json")?;
+
+    let cached_version = match parsed.get("version").and_then(|v| v.as_str()) {
+        Some(v) => v.to_string(),
+        None => return Ok(None),
+    };
+
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    if is_older_semver(&cached_version, current_version) {
+        fs::remove_dir_all(cache_dir).context("failed to remove stale OpenCode plugin cache")?;
+        Ok(Some(cached_version))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Check for a stale OpenCode plugin cache at the default location.
+///
+/// Returns `Some(old_version)` if a stale cache was cleared, `None` otherwise.
+pub fn check_and_clear_stale_opencode_cache() -> Result<Option<String>> {
+    let home = match std::env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return Ok(None),
+    };
+    let cache_dir = PathBuf::from(&home)
+        .join(".cache/opencode/packages/@shift-preflight/opencode-plugin@latest");
+    check_and_clear_stale_opencode_cache_at(&cache_dir)
 }
 
 // ── Interactive setup ────────────────────────────────────────────────
@@ -397,6 +471,28 @@ pub fn run_setup() -> Result<()> {
             Ok(true) => {
                 agent.configured = true;
                 println!("  {} {} configured", "✓".green(), agent.name);
+
+                // Check for stale OpenCode plugin cache after configuring
+                if agent.key == "opencode" {
+                    match check_and_clear_stale_opencode_cache() {
+                        Ok(Some(old_ver)) => {
+                            println!(
+                                "  {} Cleared stale OpenCode plugin cache (was v{}, latest v{})",
+                                "✓".green(),
+                                old_ver,
+                                env!("CARGO_PKG_VERSION"),
+                            );
+                        }
+                        Ok(None) => {} // cache current or absent, nothing to do
+                        Err(e) => {
+                            println!(
+                                "  {} OpenCode plugin cache check failed: {}",
+                                "→".yellow(),
+                                e,
+                            );
+                        }
+                    }
+                }
             }
             Ok(false) if agent.key == "cursor" => {
                 println!(
@@ -456,4 +552,113 @@ pub fn run_setup() -> Result<()> {
     println!("Run `shift-ai gain` to see cumulative token savings.");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    /// Create a fake OpenCode plugin cache directory with a package.json
+    /// containing the given version string.
+    fn make_fake_cache(base: &Path, version: &str) {
+        let pkg_dir = base.join("node_modules/@shift-preflight/opencode-plugin");
+        fs::create_dir_all(&pkg_dir).unwrap();
+        let pkg_json = pkg_dir.join("package.json");
+        let content = serde_json::json!({
+            "name": "@shift-preflight/opencode-plugin",
+            "version": version
+        });
+        fs::write(&pkg_json, serde_json::to_string_pretty(&content).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn test_check_stale_cache_detects_old_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().to_path_buf();
+
+        // The CLI version from Cargo.toml (e.g. "0.9.4").
+        // Create a cache with a version guaranteed to be older.
+        make_fake_cache(&cache_dir, "0.0.1");
+
+        let result = check_and_clear_stale_opencode_cache_at(&cache_dir).unwrap();
+        assert_eq!(result, Some("0.0.1".to_string()));
+        // Directory should have been deleted
+        assert!(!cache_dir.exists());
+    }
+
+    #[test]
+    fn test_check_stale_cache_skips_current_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().to_path_buf();
+
+        let current = env!("CARGO_PKG_VERSION");
+        make_fake_cache(&cache_dir, current);
+
+        let result = check_and_clear_stale_opencode_cache_at(&cache_dir).unwrap();
+        assert_eq!(result, None);
+        // Directory should still exist
+        assert!(cache_dir.exists());
+    }
+
+    #[test]
+    fn test_check_stale_cache_skips_missing_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().join("nonexistent");
+        // Don't create anything — cache_dir does not exist
+
+        let result = check_and_clear_stale_opencode_cache_at(&cache_dir).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_configure_opencode_sets_correct_baseurl() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("opencode.json");
+
+        // Write a minimal config
+        let initial = serde_json::json!({
+            "$schema": "https://opencode.ai/config.json"
+        });
+        fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&initial).unwrap(),
+        )
+        .unwrap();
+
+        let result = configure_opencode_at(&config_path, 8787).unwrap();
+        assert!(result);
+
+        // Read back and verify
+        let content = fs::read_to_string(&config_path).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        let base_url = config["provider"]["anthropic"]["options"]["baseURL"]
+            .as_str()
+            .unwrap();
+        assert_eq!(base_url, "http://localhost:8787");
+        // Must NOT contain /v1
+        assert!(
+            !base_url.contains("/v1"),
+            "baseURL should not contain /v1, got: {}",
+            base_url
+        );
+
+        // Verify plugin was added
+        let plugins = config["plugin"].as_array().unwrap();
+        assert!(plugins
+            .iter()
+            .any(|v| v.as_str() == Some("@shift-preflight/opencode-plugin")));
+    }
+
+    #[test]
+    fn test_is_older_semver() {
+        assert!(is_older_semver("0.0.1", "0.9.4"));
+        assert!(is_older_semver("0.9.3", "0.9.4"));
+        assert!(is_older_semver("0.8.0", "1.0.0"));
+        assert!(!is_older_semver("0.9.4", "0.9.4")); // same
+        assert!(!is_older_semver("1.0.0", "0.9.4")); // newer
+        assert!(!is_older_semver("0.9.5", "0.9.4")); // newer patch
+        assert!(!is_older_semver("invalid", "0.9.4")); // invalid
+    }
 }
