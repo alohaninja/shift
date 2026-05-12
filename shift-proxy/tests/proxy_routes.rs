@@ -7,12 +7,15 @@
 use axum::body::Body;
 use axum::extract::State as AxumState;
 use axum::http::{HeaderMap, Request, StatusCode};
-use axum::response::Json;
-use axum::routing::{any, get};
+use axum::response::{IntoResponse, Json};
+use axum::routing::{any, get, post};
 use axum::Router;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use http_body_util::BodyExt;
 use shift_proxy::state::ProviderUrls;
 use shift_proxy::{create_app, ProxyConfig};
+use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -452,4 +455,133 @@ async fn health_backward_compatible_with_opencode_plugin() {
     // OpenCode plugin checks: body.version exists
     assert!(json.get("version").is_some());
     assert!(!json["version"].as_str().unwrap().is_empty());
+}
+
+// ── Gzip SSE streaming ──────────────────────────────────────────────
+
+/// Mock handler that serves a gzip-compressed SSE response with Content-Encoding: gzip.
+/// This simulates what Anthropic returns when the client sends Accept-Encoding: gzip.
+async fn mock_gzip_sse() -> impl IntoResponse {
+    let sse_body = "event: message_start\ndata: {\"type\":\"message_start\"}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"Hello\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(sse_body.as_bytes()).unwrap();
+    let compressed = encoder.finish().unwrap();
+
+    (
+        StatusCode::OK,
+        [
+            ("content-type", "text/event-stream"),
+            ("content-encoding", "gzip"),
+        ],
+        compressed,
+    )
+}
+
+/// Start a mock upstream that serves gzip-compressed SSE on /v1/messages.
+async fn start_gzip_mock_upstream() -> String {
+    let app = Router::new()
+        .route("/v1/messages", post(mock_gzip_sse))
+        .fallback(any(mock_gzip_sse));
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let base_url = format!("http://{}", addr);
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    base_url
+}
+
+#[tokio::test]
+async fn anthropic_gzip_response_is_decompressed() {
+    // Start a mock that serves gzip-compressed SSE (simulating Anthropic's response
+    // when the client sends Accept-Encoding: gzip).
+    let mock_url = start_gzip_mock_upstream().await;
+    let app = create_app(test_config_with_mock(&mock_url));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .header("accept-encoding", "gzip")
+                .header("x-api-key", "sk-ant-test")
+                .header("anthropic-version", "2023-06-01")
+                .body(Body::from(
+                    r#"{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Content-Encoding must NOT be present — reqwest decompressed the body.
+    assert!(
+        response.headers().get("content-encoding").is_none(),
+        "content-encoding should be stripped after decompression"
+    );
+
+    // The body must be readable SSE text, not binary gzip bytes.
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8(body_bytes.to_vec())
+        .expect("response body should be valid UTF-8 (decompressed SSE)");
+
+    assert!(
+        body_str.contains("event: message_start"),
+        "body should contain SSE events, got: {:?}",
+        &body_str[..body_str.len().min(200)]
+    );
+    assert!(
+        body_str.contains("Hello"),
+        "body should contain the streamed text"
+    );
+}
+
+#[tokio::test]
+async fn go_client_accept_encoding_gzip_gets_readable_response() {
+    // Go's net/http sets Accept-Encoding: gzip by default. This test verifies
+    // that a request with that header gets back readable text, not binary gzip.
+    let mock_url = start_gzip_mock_upstream().await;
+    let app = create_app(test_config_with_mock(&mock_url));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .header("accept-encoding", "gzip")
+                .body(Body::from(
+                    r#"{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"test"}]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+    // Gzip magic bytes: 0x1f 0x8b. If we see these, the body was NOT decompressed.
+    assert!(
+        !(body_bytes.len() >= 2 && body_bytes[0] == 0x1f && body_bytes[1] == 0x8b),
+        "response body starts with gzip magic bytes — decompression is NOT working"
+    );
+
+    // Must be valid UTF-8 text.
+    let body_str = String::from_utf8(body_bytes.to_vec())
+        .expect("response body should be valid UTF-8, not raw gzip bytes");
+
+    assert!(
+        body_str.contains("event:") || body_str.contains("data:"),
+        "response should contain SSE event markers, got: {:?}",
+        &body_str[..body_str.len().min(200)]
+    );
 }

@@ -34,6 +34,10 @@ pub fn create_app(config: ProxyConfig) -> Router {
 }
 
 /// Start the proxy server, blocking until shutdown signal.
+///
+/// Uses `axum::serve` which auto-negotiates HTTP/1.1 and HTTP/2 (h2c)
+/// via `hyper_util::server::conn::auto::Builder` internally, and provides
+/// graceful shutdown that drains in-flight connections.
 pub async fn start_server(config: ProxyConfig) -> anyhow::Result<()> {
     // Initialize tracing subscriber so that tracing::warn!/error!/info!
     // calls in route handlers are actually visible on stderr.
