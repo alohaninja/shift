@@ -333,7 +333,7 @@ fn is_older_semver(cached: &str, current: &str) -> bool {
 /// than the CLI's own version, the cache directory is deleted.
 ///
 /// Returns `Some(old_version)` if a stale cache was cleared, `None` otherwise.
-pub fn check_and_clear_stale_opencode_cache_at(cache_dir: &Path) -> Result<Option<String>> {
+pub(crate) fn check_and_clear_stale_opencode_cache_at(cache_dir: &Path) -> Result<Option<String>> {
     let pkg_json = cache_dir.join("node_modules/@shift-preflight/opencode-plugin/package.json");
 
     if !pkg_json.exists() {
@@ -353,6 +353,11 @@ pub fn check_and_clear_stale_opencode_cache_at(cache_dir: &Path) -> Result<Optio
     let current_version = env!("CARGO_PKG_VERSION");
 
     if is_older_semver(&cached_version, current_version) {
+        // Don't follow symlinks — only delete real directories
+        let meta = fs::symlink_metadata(cache_dir)?;
+        if !meta.is_dir() {
+            return Ok(None);
+        }
         fs::remove_dir_all(cache_dir).context("failed to remove stale OpenCode plugin cache")?;
         Ok(Some(cached_version))
     } else {
@@ -363,7 +368,7 @@ pub fn check_and_clear_stale_opencode_cache_at(cache_dir: &Path) -> Result<Optio
 /// Check for a stale OpenCode plugin cache at the default location.
 ///
 /// Returns `Some(old_version)` if a stale cache was cleared, `None` otherwise.
-pub fn check_and_clear_stale_opencode_cache() -> Result<Option<String>> {
+pub(crate) fn check_and_clear_stale_opencode_cache() -> Result<Option<String>> {
     let home = match std::env::var("HOME") {
         Ok(h) => h,
         Err(_) => return Ok(None),
@@ -474,28 +479,6 @@ pub fn run_setup() -> Result<()> {
             Ok(true) => {
                 agent.configured = true;
                 println!("  {} {} configured", "✓".green(), agent.name);
-
-                // Check for stale OpenCode plugin cache after configuring
-                if agent.key == "opencode" {
-                    match check_and_clear_stale_opencode_cache() {
-                        Ok(Some(old_ver)) => {
-                            println!(
-                                "  {} Cleared stale OpenCode plugin cache (was v{}, latest v{})",
-                                "✓".green(),
-                                old_ver,
-                                env!("CARGO_PKG_VERSION"),
-                            );
-                        }
-                        Ok(None) => {} // cache current or absent, nothing to do
-                        Err(e) => {
-                            println!(
-                                "  {} OpenCode plugin cache check failed: {}",
-                                "→".yellow(),
-                                e,
-                            );
-                        }
-                    }
-                }
             }
             Ok(false) if agent.key == "cursor" => {
                 println!(
@@ -515,6 +498,28 @@ pub fn run_setup() -> Result<()> {
             }
             Err(e) => {
                 println!("  {} {} — failed: {}", "✗".red(), agent.name, e);
+            }
+        }
+
+        // Always check for stale OpenCode plugin cache, regardless of config result
+        if agent.key == "opencode" {
+            match check_and_clear_stale_opencode_cache() {
+                Ok(Some(old_ver)) => {
+                    println!(
+                        "  {} Cleared stale OpenCode plugin cache (was v{}, latest v{})",
+                        "✓".green(),
+                        old_ver,
+                        env!("CARGO_PKG_VERSION"),
+                    );
+                }
+                Ok(None) => {} // cache current or absent, nothing to do
+                Err(e) => {
+                    println!(
+                        "  {} OpenCode plugin cache check failed: {}",
+                        "→".yellow(),
+                        e,
+                    );
+                }
             }
         }
     }
@@ -578,7 +583,9 @@ mod tests {
     #[test]
     fn test_check_stale_cache_detects_old_version() {
         let tmp = tempfile::tempdir().unwrap();
-        let cache_dir = tmp.path().to_path_buf();
+        // Take ownership so TempDir::drop won't try to delete after remove_dir_all
+        let tmp_path = tmp.keep();
+        let cache_dir = tmp_path.clone();
 
         // The CLI version from Cargo.toml (e.g. "0.9.4").
         // Create a cache with a version guaranteed to be older.
@@ -588,6 +595,8 @@ mod tests {
         assert_eq!(result, Some("0.0.1".to_string()));
         // Directory should have been deleted
         assert!(!cache_dir.exists());
+        // Clean up the parent if it still exists (it shouldn't, since cache_dir == tmp_path)
+        let _ = fs::remove_dir_all(&tmp_path);
     }
 
     #[test]
@@ -668,5 +677,56 @@ mod tests {
         assert!(!is_older_semver("1.0.0", "0.9.4")); // newer
         assert!(!is_older_semver("0.9.5", "0.9.4")); // newer patch
         assert!(!is_older_semver("invalid", "0.9.4")); // invalid
+    }
+
+    /// Pre-release versions (e.g. "0.9.4-beta.1") contain a hyphen in the
+    /// patch component, so `parse()` returns `None` and `is_older_semver`
+    /// safely returns `false` — meaning we do NOT delete the cache.  This
+    /// is the conservative choice: don't delete what we can't understand.
+    #[test]
+    fn test_is_older_semver_prerelease() {
+        assert!(!is_older_semver("0.9.4-beta.1", "0.9.4"));
+        assert!(!is_older_semver("0.9.4", "0.9.5-rc.1"));
+        assert!(!is_older_semver("1.0.0-alpha", "1.0.0"));
+    }
+
+    /// Validates the core migration scenario: an existing opencode.json with
+    /// the OLD baseURL (missing `/v1`) gets corrected to include `/v1`.
+    #[test]
+    fn test_configure_opencode_overwrites_old_baseurl() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("opencode.json");
+
+        // Write a config with the OLD wrong baseURL (no /v1 suffix)
+        let initial = serde_json::json!({
+            "$schema": "https://opencode.ai/config.json",
+            "provider": {
+                "anthropic": {
+                    "options": {
+                        "baseURL": "http://localhost:8787"
+                    }
+                }
+            }
+        });
+        fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&initial).unwrap(),
+        )
+        .unwrap();
+
+        let result = configure_opencode_at(&config_path, 8787).unwrap();
+        assert!(result);
+
+        // Read back and verify the baseURL was corrected
+        let content = fs::read_to_string(&config_path).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        let base_url = config["provider"]["anthropic"]["options"]["baseURL"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            base_url, "http://localhost:8787/v1",
+            "Old baseURL without /v1 must be overwritten to include /v1"
+        );
     }
 }
