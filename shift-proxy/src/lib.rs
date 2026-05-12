@@ -6,7 +6,7 @@
 //!
 //! ```text
 //! Client (OpenCode, Claude Code, Codex, etc.)
-//!   │  (HTTP/1.1 or HTTP/2 over cleartext — h2c)
+//!   │
 //!   ├── POST /v1/messages         → Anthropic (optimize + forward)
 //!   ├── POST /messages            → Anthropic (rewrite → /v1/messages)
 //!   ├── POST /v1/chat/completions → OpenAI   (optimize + forward)
@@ -22,11 +22,8 @@ pub mod routes;
 pub mod state;
 
 use axum::Router;
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::server::conn::auto::Builder as AutoBuilder;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
-use tower::Service;
 
 pub use state::{ProxyConfig, ProxyState};
 
@@ -38,10 +35,9 @@ pub fn create_app(config: ProxyConfig) -> Router {
 
 /// Start the proxy server, blocking until shutdown signal.
 ///
-/// The server auto-negotiates HTTP/1.1 and HTTP/2 over cleartext (h2c).
-/// HTTP/2 provides multiplexed streams and header compression, which
-/// improves SSE streaming performance for clients like OpenCode (Go)
-/// that negotiate h2c by default.
+/// Uses `axum::serve` which auto-negotiates HTTP/1.1 and HTTP/2 (h2c)
+/// via `hyper_util::server::conn::auto::Builder` internally, and provides
+/// graceful shutdown that drains in-flight connections.
 pub async fn start_server(config: ProxyConfig) -> anyhow::Result<()> {
     // Initialize tracing subscriber so that tracing::warn!/error!/info!
     // calls in route handlers are actually visible on stderr.
@@ -66,47 +62,13 @@ pub async fn start_server(config: ProxyConfig) -> anyhow::Result<()> {
     let listener = TcpListener::bind(addr).await?;
 
     if verbose {
-        tracing::info!("shift proxy listening on http://{} (h1+h2c)", addr);
+        tracing::info!("shift proxy listening on http://{}", addr);
     }
     eprintln!("[shift] proxy listening on http://{}", addr);
 
-    // Serve with auto HTTP/1.1 + HTTP/2 negotiation (h2c).
-    // This replaces axum::serve which only supports HTTP/1.1.
-    let shutdown = shutdown_signal();
-    tokio::pin!(shutdown);
-
-    loop {
-        tokio::select! {
-            result = listener.accept() => {
-                let (stream, _remote_addr) = result?;
-                let tower_service = app.clone();
-
-                tokio::spawn(async move {
-                    let io = TokioIo::new(stream);
-                    let hyper_service = hyper::service::service_fn(move |req| {
-                        let mut svc = tower_service.clone();
-                        async move { svc.call(req).await }
-                    });
-
-                    // auto::Builder negotiates h2c with HTTP/1.1 fallback.
-                    if let Err(err) = AutoBuilder::new(TokioExecutor::new())
-                        .serve_connection_with_upgrades(io, hyper_service)
-                        .await
-                    {
-                        // Connection errors are expected during shutdown
-                        // or when clients disconnect early.
-                        if !err.to_string().contains("connection closed") {
-                            tracing::warn!("connection error: {}", err);
-                        }
-                    }
-                });
-            }
-            _ = &mut shutdown => {
-                tracing::info!("shutdown signal received");
-                break;
-            }
-        }
-    }
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
     Ok(())
 }

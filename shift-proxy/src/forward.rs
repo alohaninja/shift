@@ -29,8 +29,15 @@ const STRIP_RESPONSE_HEADERS: &[&str] = &[
     "upgrade",
 ];
 
-/// Headers stripped from the forwarded request (we let the upstream set its own).
-const STRIP_REQUEST_HEADERS: &[&str] = &["host", "content-length"];
+/// Headers stripped from the forwarded request.
+///
+/// - `host` / `content-length`: stale for the upstream connection.
+/// - `accept-encoding`: let reqwest negotiate compression based on its enabled
+///   decompression features (`gzip`, `brotli`, `deflate`). Forwarding the client's
+///   header could request encodings reqwest can't decompress (e.g., `zstd`), which
+///   would result in raw compressed bytes reaching the client after we strip
+///   `content-encoding`.
+const STRIP_REQUEST_HEADERS: &[&str] = &["host", "content-length", "accept-encoding"];
 
 /// Forward a request to an upstream URL, streaming the response back.
 ///
@@ -126,10 +133,11 @@ mod tests {
     use axum::http::header;
 
     #[test]
-    fn forward_headers_strips_host_and_content_length() {
+    fn forward_headers_strips_host_content_length_and_accept_encoding() {
         let mut headers = HeaderMap::new();
         headers.insert(header::HOST, "example.com".parse().unwrap());
         headers.insert(header::CONTENT_LENGTH, "42".parse().unwrap());
+        headers.insert(header::ACCEPT_ENCODING, "gzip, br".parse().unwrap());
         headers.insert(header::AUTHORIZATION, "Bearer sk-test".parse().unwrap());
         headers.insert("x-api-key", "sk-ant-test".parse().unwrap());
         headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
@@ -138,6 +146,10 @@ mod tests {
 
         assert!(result.get(header::HOST).is_none());
         assert!(result.get(header::CONTENT_LENGTH).is_none());
+        assert!(
+            result.get(header::ACCEPT_ENCODING).is_none(),
+            "accept-encoding should be stripped so reqwest negotiates its own"
+        );
         assert_eq!(result.get(header::AUTHORIZATION).unwrap(), "Bearer sk-test");
         assert_eq!(result.get("x-api-key").unwrap(), "sk-ant-test");
         assert_eq!(result.get("anthropic-version").unwrap(), "2023-06-01");
