@@ -12,6 +12,9 @@ use reqwest::Client;
 ///
 /// - `content-encoding` / `content-length`: reqwest auto-decompresses response
 ///   bodies, so these are stale. Forwarding them causes double-decompression.
+///   NOTE: The `gzip`, `brotli`, and `deflate` features MUST be enabled on reqwest
+///   for this stripping to be correct. Without them, reqwest does NOT decompress,
+///   and stripping content-encoding causes clients to receive raw compressed bytes.
 /// - Hop-by-hop headers per RFC 9110 §7.6.1.
 const STRIP_RESPONSE_HEADERS: &[&str] = &[
     "content-encoding",
