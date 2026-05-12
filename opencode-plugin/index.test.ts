@@ -3,6 +3,31 @@ import type { BunShell } from "@opencode-ai/plugin/dist/shell";
 import { version as PACKAGE_VERSION } from "./package.json";
 
 // ---------------------------------------------------------------------------
+// Version helpers — compute relative versions from PACKAGE_VERSION so tests
+// don't break when the version is bumped by release-please.
+// ---------------------------------------------------------------------------
+function bumpPatch(v: string): string {
+  const [maj, min, patch] = v.replace(/-.*$/, "").split(".").map(Number);
+  return `${maj}.${min}.${patch + 1}`;
+}
+function bumpMinor(v: string): string {
+  const [maj, min] = v.replace(/-.*$/, "").split(".").map(Number);
+  return `${maj}.${min + 1}.0`;
+}
+function bumpMajor(v: string): string {
+  const [maj] = v.replace(/-.*$/, "").split(".").map(Number);
+  return `${maj + 1}.0.0`;
+}
+function prevPatch(v: string): string {
+  const [maj, min, patch] = v.replace(/-.*$/, "").split(".").map(Number);
+  return patch > 0 ? `${maj}.${min}.${patch - 1}` : `${maj}.${min > 0 ? min - 1 : 0}.99`;
+}
+function prevMinor(v: string): string {
+  const [maj, min] = v.replace(/-.*$/, "").split(".").map(Number);
+  return min > 0 ? `${maj}.${min - 1}.0` : `${maj > 0 ? maj - 1 : 0}.99.0`;
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -246,33 +271,31 @@ describe("ShiftProxyPlugin", () => {
     });
 
     it("keeps proxy at newer patch", async () => {
-      // PACKAGE_VERSION is 0.9.3 — 0.9.4 is newer patch
-      await expectVersionKept("0.9.4", true);
+      await expectVersionKept(bumpPatch(PACKAGE_VERSION), true);
     });
 
     it("keeps proxy at newer minor", async () => {
-      await expectVersionKept("0.10.0", true);
+      await expectVersionKept(bumpMinor(PACKAGE_VERSION), true);
     });
 
     it("keeps proxy at newer major", async () => {
-      await expectVersionKept("1.0.0", true);
+      await expectVersionKept(bumpMajor(PACKAGE_VERSION), true);
     });
 
     it("restarts proxy at older patch", async () => {
-      await expectVersionKept("0.9.2", false);
+      await expectVersionKept(prevPatch(PACKAGE_VERSION), false);
     });
 
     it("restarts proxy at older minor", async () => {
-      await expectVersionKept("0.8.0", false);
+      await expectVersionKept(prevMinor(PACKAGE_VERSION), false);
     });
 
     it("strips pre-release suffix and keeps newer base version", async () => {
-      // 0.10.0-rc.1 → stripped to 0.10.0 which is > 0.9.3
-      await expectVersionKept("0.10.0-rc.1", true);
+      await expectVersionKept(`${bumpMinor(PACKAGE_VERSION)}-rc.1`, true);
     });
 
     it("strips pre-release suffix and keeps equal base version", async () => {
-      // 0.9.3-beta.1 → stripped to 0.9.3 which equals PACKAGE_VERSION
+      // e.g. 0.9.5-beta.1 → stripped to 0.9.5 which equals PACKAGE_VERSION
       await expectVersionKept(`${PACKAGE_VERSION}-beta.1`, true);
     });
   });
