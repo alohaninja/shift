@@ -5,8 +5,10 @@
 //! handlers (e.g., OpenAI batch endpoints, Anthropic beta paths, GET
 //! /v1/models, etc.).
 
+use crate::body::extract_body;
 use crate::forward::forward_request;
 use crate::ProxyState;
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
@@ -18,8 +20,27 @@ pub async fn passthrough_handler(
     method: Method,
     uri: Uri,
     headers: HeaderMap,
-    body: String,
+    body: Bytes,
 ) -> Response {
+    let has_body = !matches!(method, Method::GET | Method::HEAD);
+
+    // Only decompress for methods that carry a body — avoids pointless
+    // work on empty GET/HEAD payloads.
+    let body = if has_body {
+        match extract_body(&headers, body) {
+            Ok(s) => s,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    axum::Json(serde_json::json!({"error": e})),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        String::new()
+    };
+
     let path = uri.path();
     let provider = detect_provider_from_route(path);
 
@@ -45,8 +66,6 @@ pub async fn passthrough_handler(
         tracing::info!("Passthrough: {} {} → {}{}", method, path, base_url, path);
     }
 
-    // For methods without a body (GET, HEAD), don't forward one.
-    let has_body = !matches!(method, Method::GET | Method::HEAD);
     let body = if has_body { Some(body) } else { None };
 
     forward_request(
@@ -63,7 +82,11 @@ pub async fn passthrough_handler(
 fn detect_provider_from_route(path: &str) -> Option<&'static str> {
     if path.starts_with("/v1/messages") || path == "/messages" {
         Some("anthropic")
-    } else if path.starts_with("/v1/chat/") || path.starts_with("/v1/embeddings") {
+    } else if path.starts_with("/v1/chat/")
+        || path.starts_with("/v1/embeddings")
+        || path.starts_with("/v1/responses")
+        || path == "/responses"
+    {
         Some("openai")
     } else if path.starts_with("/v1beta/") || path.starts_with("/v1/models/gemini") {
         Some("google")
@@ -100,6 +123,9 @@ mod tests {
             Some("openai")
         );
         assert_eq!(detect_provider_from_route("/v1/embeddings"), Some("openai"));
+        assert_eq!(detect_provider_from_route("/v1/responses"), Some("openai"));
+        // Bare /responses (without /v1 prefix) should also route to OpenAI
+        assert_eq!(detect_provider_from_route("/responses"), Some("openai"));
     }
 
     #[test]
