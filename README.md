@@ -18,6 +18,7 @@
   <a href="https://crates.io/crates/shift-preflight-cli"><img src="https://img.shields.io/crates/v/shift-preflight-cli" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/@shift-preflight/runtime"><img src="https://img.shields.io/npm/v/@shift-preflight/runtime?label=runtime" alt="npm runtime"></a>
   <a href="https://www.npmjs.com/package/@shift-preflight/opencode-plugin"><img src="https://img.shields.io/npm/v/@shift-preflight/opencode-plugin?label=opencode-plugin" alt="npm opencode-plugin"></a>
+  <a href="https://skills.sh/alohaninja/shift"><img src="https://img.shields.io/badge/skills.sh-shift--ai-black" alt="skills.sh"></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
 </p>
 
@@ -235,7 +236,7 @@ If you use an AI coding agent (Claude Code, Cursor, Copilot, Windsurf, etc.):
 npx skills add alohaninja/shift
 ```
 
-This installs the `shift-ai` skill, which teaches your agent when and how to use SHIFT to optimize image payloads.
+This installs the `shift-ai` skill, which teaches your agent when and how to use SHIFT to optimize image payloads. The skill is listed on [skills.sh](https://skills.sh/alohaninja/shift), the open Agent Skills directory.
 
 ### Verify installation
 
