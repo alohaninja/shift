@@ -12,7 +12,7 @@ Key commands:
 - `shift-ai <file>` — transform payload, write optimized JSON to stdout.
 - `shift-ai gain` — view cumulative token savings across all recorded runs.
 
-When asked to optimize images for AI model API requests, load the `shift-ai-preflight` skill at `skills/shift-ai-preflight/SKILL.md`.
+When asked to optimize images for AI model API requests, load the `shift-ai` skill at `skills/shift-ai/SKILL.md`.
 
 ## Project structure
 
