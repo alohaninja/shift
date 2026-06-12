@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.9](https://github.com/alohaninja/shift/compare/v0.9.8...v0.9.9) (2026-06-12)
+
+
+### Bug Fixes
+
+* make skills/shift-ai-preflight a real directory so skills CLI discovery works ([#56](https://github.com/alohaninja/shift/issues/56)) ([9a53928](https://github.com/alohaninja/shift/commit/9a53928fb995483c467c085afbcab217556ad63b))
+
 ## [0.9.8](https://github.com/alohaninja/shift/compare/v0.9.7...v0.9.8) (2026-05-12)
 
 
