@@ -17,7 +17,7 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           config-file: release-please-config.json
@@ -42,7 +42,7 @@ jobs:
             os: ubuntu-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -79,7 +79,7 @@ jobs:
           tar czf ../../../shift-ai-${{ matrix.target }}.tar.gz shift-ai
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: shift-ai-${{ matrix.target }}
           path: shift-ai-${{ matrix.target }}.tar.gz
@@ -91,10 +91,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
@@ -127,7 +127,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -179,9 +179,9 @@ jobs:
       run:
         working-directory: runtime
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
@@ -209,13 +209,13 @@ jobs:
       run:
         working-directory: opencode-plugin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
 
