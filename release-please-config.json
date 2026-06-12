@@ -15,6 +15,16 @@
           "jsonpath": "$.dependencies.shift-preflight.version"
         },
         {
+          "type": "toml",
+          "path": "shift-cli/Cargo.toml",
+          "jsonpath": "$.dependencies.shift-proxy.version"
+        },
+        {
+          "type": "toml",
+          "path": "shift-proxy/Cargo.toml",
+          "jsonpath": "$.dependencies.shift-preflight.version"
+        },
+        {
           "type": "json",
           "path": "runtime/package.json",
           "jsonpath": "$.version"

@@ -1635,7 +1635,7 @@ dependencies = [
 
 [[package]]
 name = "shift-preflight"
-version = "0.9.7"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1651,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "shift-preflight-cli"
-version = "0.9.7"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1668,7 +1668,7 @@ dependencies = [
 
 [[package]]
 name = "shift-proxy"
-version = "0.9.7"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "axum",
