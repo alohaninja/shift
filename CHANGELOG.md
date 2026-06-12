@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/alohaninja/shift/compare/v0.10.0...v0.10.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* bump internal dependency pins with workspace version ([#61](https://github.com/alohaninja/shift/issues/61)) ([2a4fb3f](https://github.com/alohaninja/shift/commit/2a4fb3f23ee0772b1f75e4d109998a90df5b0126))
+
 ## [0.10.0](https://github.com/alohaninja/shift/compare/v0.9.9...v0.10.0) (2026-06-12)
 
 
