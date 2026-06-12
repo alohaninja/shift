@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/alohaninja/shift/compare/v0.10.1...v0.10.2) (2026-06-12)
+
+
+### Bug Fixes
+
+* publish npm packages via trusted publishing (OIDC) ([#63](https://github.com/alohaninja/shift/issues/63)) ([3f72ca9](https://github.com/alohaninja/shift/commit/3f72ca90c5d4bcdad060ff4a5b470507ecda1572))
+
 ## [0.10.1](https://github.com/alohaninja/shift/compare/v0.10.0...v0.10.1) (2026-06-12)
 
 
