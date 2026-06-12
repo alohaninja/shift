@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/alohaninja/shift/compare/v0.9.9...v0.10.0) (2026-06-12)
+
+
+### Features
+
+* rename agent skill shift-ai-preflight to shift-ai ([#59](https://github.com/alohaninja/shift/issues/59)) ([e3910f7](https://github.com/alohaninja/shift/commit/e3910f787594a9351515bcef6cd906f1a33e2891))
+
 ## [0.9.9](https://github.com/alohaninja/shift/compare/v0.9.8...v0.9.9) (2026-06-12)
 
 
