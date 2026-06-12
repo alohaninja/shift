@@ -1,6 +1,6 @@
 {
   "name": "@shift-preflight/runtime",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "description": "Multimodal preflight for any AI agent — AI SDK middleware for transparent image optimization",
   "type": "module",
   "main": "./dist/index.js",
