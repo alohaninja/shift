@@ -1,5 +1,5 @@
 ---
-name: shift-ai-preflight
+name: shift-ai
 description: Inspect and optimize base64-encoded images in AI API request payloads before sending to OpenAI or Anthropic. Prevents oversized-image failures, preserves JPEG format on resize, and reduces multimodal token usage. Use when building or debugging multimodal API requests with inline base64 images, troubleshooting 400 errors from oversized images, or reducing vision token costs.
 ---
 

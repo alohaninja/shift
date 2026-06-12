@@ -1,11 +1,11 @@
 {
   "version": 1,
   "skills": {
-    "shift-ai-preflight": {
+    "shift-ai": {
       "source": "alohaninja/shift",
       "sourceType": "github",
-      "skillPath": "skills/shift-ai-preflight/SKILL.md",
-      "computedHash": "a556fe2485344b7bb259d1907f3f10062bb637cbdd980a64a34446c6d6fb5d74"
+      "skillPath": "skills/shift-ai/SKILL.md",
+      "computedHash": "2bb174ecaba093c595a903c99e50eb030ca15c5dadd9916e0f7076f61d2b62d5"
     }
   }
 }

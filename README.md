@@ -235,7 +235,7 @@ If you use an AI coding agent (Claude Code, Cursor, Copilot, Windsurf, etc.):
 npx skills add alohaninja/shift
 ```
 
-This installs the `shift-ai-preflight` skill, which teaches your agent when and how to use SHIFT to optimize image payloads.
+This installs the `shift-ai` skill, which teaches your agent when and how to use SHIFT to optimize image payloads.
 
 ### Verify installation
 
