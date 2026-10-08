@@ -142,6 +142,11 @@ The plugin never downgrades a healthy newer proxy. Upgrade the `shift-ai` CLI
 alongside the plugin: `proxy ensure` starts the installed binary, so a newer
 plugin alone cannot upgrade an older daemon.
 
+If the CLI reports a legacy PID-only state file, automatic restart is refused
+until the old daemon is stopped and its legacy state removed. Follow the
+[one-time daemon migration](../README.md#daemon-ownership-and-upgrades); the plugin
+can continue using the healthy old proxy in the meantime.
+
 ## Troubleshooting
 
 | Problem | Fix |

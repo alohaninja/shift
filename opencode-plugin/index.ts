@@ -127,8 +127,9 @@ async function ensureProxy(): Promise<void> {
     );
     try {
       await run(["proxy", "stop", "--quiet"]);
-    } catch {
-      // Best-effort — proxy ensure will handle port conflicts
+    } catch (err) {
+      // Preserve ownership/migration diagnostics; ensure may reuse the old daemon.
+      console.warn(`[shift] could not stop existing proxy: ${err}`);
     }
   }
 
@@ -137,10 +138,14 @@ async function ensureProxy(): Promise<void> {
     await run(["proxy", "ensure", "--quiet"]);
 
     const postProbe = await probeShiftProxy(port);
-    if (postProbe.healthy) {
-      const runningVersion = postProbe.version ?? PACKAGE_VERSION;
+    if (postProbe.healthy && postProbe.version && isVersionAtLeast(postProbe.version, PACKAGE_VERSION)) {
+      const runningVersion = postProbe.version;
       console.log(
         `[shift] proxy v${runningVersion} started on port ${port}`,
+      );
+    } else if (postProbe.healthy) {
+      console.warn(
+        `[shift] keeping healthy proxy v${postProbe.version ?? "unknown"}; automatic restart did not complete (expected ${PACKAGE_VERSION} or newer). Check the CLI diagnostic above before retrying`,
       );
     } else {
       console.warn(
