@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
-import type { BunShell } from "@opencode-ai/plugin/dist/shell";
+import type { PluginInput } from "@opencode-ai/plugin";
+import * as childProcess from "node:child_process";
 import { version as PACKAGE_VERSION } from "./package.json";
 
 // ---------------------------------------------------------------------------
@@ -31,20 +32,14 @@ function prevMinor(v: string): string {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Build a mock `$` tagged-template shell that resolves or rejects. */
-function createMockShell(behavior: "resolve" | "reject"): BunShell {
-  const shellFn = (() => {
-    const promise =
-      behavior === "resolve"
-        ? Promise.resolve({ exitCode: 0, stdout: Buffer.from(""), stderr: Buffer.from("") })
-        : Promise.reject(new Error("not found"));
+type CommandRunner = (command: string) => Promise<string>;
 
-    // The plugin calls $`which shift-ai`.quiet(), so the returned promise
-    // needs a .quiet() method that returns itself.
-    (promise as any).quiet = () => promise;
-    return promise;
-  }) as unknown as BunShell;
-  return shellFn;
+/** Command fixtures supply stdout or reject, without starting real processes. */
+function createMockShell(behavior: "resolve" | "reject"): CommandRunner {
+  return async () => {
+    if (behavior === "reject") throw new Error("not found");
+    return `shift-ai ${PACKAGE_VERSION}\n`;
+  };
 }
 
 /**
@@ -58,12 +53,7 @@ function createTrackingShell(
 ) {
   const calls: string[] = [];
 
-  const shellFn = ((strings: TemplateStringsArray, ...values: unknown[]) => {
-    // Reconstruct the template literal into a single command string
-    let cmd = strings[0];
-    for (let i = 0; i < values.length; i++) {
-      cmd += String(values[i]) + strings[i + 1];
-    }
+  const shellFn: CommandRunner = async (cmd) => {
     calls.push(cmd);
 
     // Determine result based on command content
@@ -75,26 +65,23 @@ function createTrackingShell(
       }
     }
 
-    const promise = shouldReject
-      ? Promise.reject(new Error(`command failed: ${cmd}`))
-      : Promise.resolve({ exitCode: 0, stdout: Buffer.from(""), stderr: Buffer.from("") });
-
-    (promise as any).quiet = () => promise;
-    return promise;
-  }) as unknown as BunShell;
+    if (shouldReject) throw new Error(`command failed: ${cmd}`);
+    return `shift-ai ${PACKAGE_VERSION}\n`;
+  };
 
   return { shell: shellFn, calls };
 }
 
-/** Build a minimal PluginInput with the given shell. */
-function createPluginInput(shell: BunShell) {
-  return {
-    $: shell,
-    client: {} as any,
-    project: {} as any,
-    directory: "/tmp",
-    worktree: "/tmp",
-  };
+/** Reuse command fixtures at the Node subprocess boundary for both entrypoints. */
+function createPluginInput(shell: CommandRunner): PluginInput {
+  spyOn(childProcess, "execFile").mockImplementation(((command: string, args: string[], _options: unknown, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
+    shell([command, ...args].join(" ")).then(
+      (stdout) => callback(null, stdout, ""),
+      (error) => callback(error, "", ""),
+    );
+    return {};
+  }) as any);
+  return {} as PluginInput;
 }
 
 /** Create a mock Response with JSON body. */
@@ -144,6 +131,7 @@ describe("ShiftProxyPlugin", () => {
     warnSpy.mockRestore();
     logSpy.mockRestore();
     globalThis.fetch = originalFetch;
+    mock.restore();
   });
 
   // -------------------------------------------------------------------------
@@ -180,7 +168,7 @@ describe("ShiftProxyPlugin", () => {
 
       expect(hooks).toEqual({});
       expect(fetchMock).toHaveBeenCalled();
-      // Should only have called `which shift-ai`, not `proxy ensure`
+      // Should only have called `shift-ai --version`, not `proxy ensure`
       expect(calls.some((c) => c.includes("proxy ensure"))).toBe(false);
     });
 

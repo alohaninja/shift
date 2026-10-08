@@ -585,10 +585,10 @@ eprintln!("{}", report); <span class="comment">// what changed and why</span></c
       <div class="code-block-full">
         <span class="code-lang">json</span>
         <code>{
-  "plugin": ["@shift-preflight/opencode-plugin"],
-  "provider": {
+  "plugins": ["@shift-preflight/opencode-plugin"],
+  "providers": {
     "anthropic": {
-      "options": {
+      "settings": {
         "baseURL": "http://localhost:8787/v1"
       }
     }
@@ -606,7 +606,7 @@ eprintln!("{}", report); <span class="comment">// what changed and why</span></c
         <li><strong style="color: var(--text);">Verifies startup</strong> &mdash; confirms the proxy is healthy before proceeding.</li>
       </ol>
 
-      <p>OpenCode auto-installs npm plugins at startup via Bun. No <code>npm install</code> needed. First launch takes ~6 seconds (npx download); subsequent launches detect the running proxy instantly.</p>
+      <p>OpenCode installs npm plugins automatically. Supports V2 and V1 1.18.29+. For V1, use <code>plugin</code>, <code>provider</code>, and <code>options</code> instead of <code>plugins</code>, <code>providers</code>, and <code>settings</code>.</p>
 
       <p>Once the proxy is running, other agents can piggyback on it:</p>
 
