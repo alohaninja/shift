@@ -1,8 +1,11 @@
 import type { Plugin } from "@opencode-ai/plugin";
+import type { Plugin as V2Plugin } from "@opencode/plugin";
+import { execFile } from "node:child_process";
 import { version as PACKAGE_VERSION } from "./package.json";
 
 const DEFAULT_PORT = 8787;
 const PROBE_TIMEOUT_MS = 2_000;
+const COMMAND_TIMEOUT_MS = 15_000;
 const HEALTH_SERVICE_ID = "@shift-preflight/runtime proxy";
 
 /** Result of probing the running proxy's health endpoint. */
@@ -31,10 +34,10 @@ interface ProxyProbeResult {
  * 2. Add the plugin and provider config to `opencode.json`:
  *    ```json
  *    {
- *      "plugin": ["@shift-preflight/opencode-plugin"],
- *      "provider": {
+ *      "plugins": ["@shift-preflight/opencode-plugin"],
+ *      "providers": {
  *        "anthropic": {
- *          "options": {
+ *          "settings": {
  *            "baseURL": "http://localhost:8787/v1"
  *          }
  *        }
@@ -77,14 +80,28 @@ function isVersionAtLeast(running: string, required: string): boolean {
   return rPatch >= pPatch;
 }
 
-export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
+async function run(args: string[]) {
+  return new Promise<{ stdout: string }>((resolve, reject) => {
+    execFile("shift-ai", args, {
+      timeout: args[0] === "--version" ? PROBE_TIMEOUT_MS : COMMAND_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    }, (error, stdout) => {
+      if (error) reject(error);
+      else resolve({ stdout });
+    });
+  });
+}
+
+async function ensureProxy(): Promise<void> {
   const port = DEFAULT_PORT;
+  let installedVersion: string | undefined;
 
   // Bail if shift-ai CLI is not installed
   try {
-    await $`which shift-ai`.quiet();
+    const { stdout } = await run(["--version"]);
+    installedVersion = /^shift-ai (\d+\.\d+\.\d+(?:-[\w.-]+)?)/m.exec(stdout.toString())?.[1];
   } catch {
-    return {};
+    return;
   }
 
   // Check if the SHIFT proxy is already running by probing the health endpoint.
@@ -94,7 +111,13 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
     // Proxy is running — check if it's at least the version we need.
     // A newer proxy is fine (don't downgrade); only restart if older.
     if (probe.version && isVersionAtLeast(probe.version, PACKAGE_VERSION)) {
-      return {};
+      return;
+    }
+
+    // `ensure` starts the installed CLI itself; restarting cannot upgrade it.
+    if (!installedVersion || !isVersionAtLeast(installedVersion, PACKAGE_VERSION)) {
+      console.warn(`[shift] keeping healthy proxy v${probe.version ?? "unknown"}; upgrade shift-ai to ${PACKAGE_VERSION} or newer before restarting`);
+      return;
     }
 
     // Running proxy is older or has no version — stop it so we can start ours.
@@ -103,16 +126,15 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
       `[shift] proxy version mismatch: running ${old}, expected ${PACKAGE_VERSION} — restarting`,
     );
     try {
-      await $`shift-ai proxy stop --quiet`.quiet();
+      await run(["proxy", "stop", "--quiet"]);
     } catch {
       // Best-effort — proxy ensure will handle port conflicts
     }
   }
 
-  // Use `shift-ai proxy ensure` — handles daemon lifecycle, PID files,
-  // health checks, and version-pinned npx spawn internally.
+  // The CLI handles daemon lifecycle, PID files, and startup health checks.
   try {
-    await $`shift-ai proxy ensure --quiet`.quiet();
+    await run(["proxy", "ensure", "--quiet"]);
 
     const postProbe = await probeShiftProxy(port);
     if (postProbe.healthy) {
@@ -131,7 +153,11 @@ export const ShiftProxyPlugin: Plugin = async ({ $ }) => {
       `[shift] To bypass, remove baseURL from provider config in opencode.json`,
     );
   }
+}
 
+/** V1 and V2 share bounded subprocess execution. */
+export const ShiftProxyPlugin: Plugin = async () => {
+  await ensureProxy();
   return {};
 };
 
@@ -156,4 +182,11 @@ async function probeShiftProxy(port: number): Promise<ProxyProbeResult> {
   }
 }
 
-export default ShiftProxyPlugin;
+// Type-only V2 import keeps the published plugin free of runtime SDK dependencies.
+export default {
+  id: "shift-preflight",
+  async setup() {
+    await ensureProxy();
+  },
+  server: ShiftProxyPlugin,
+} satisfies V2Plugin.Plugin & { server: Plugin };

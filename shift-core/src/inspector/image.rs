@@ -269,11 +269,10 @@ fn extract_svg_viewbox(svg: &str) -> Option<(u32, u32)> {
     let value = if let Some(stripped) = after_eq.strip_prefix('"') {
         let end = stripped.find('"')?;
         &stripped[..end]
-    } else if let Some(stripped) = after_eq.strip_prefix('\'') {
+    } else {
+        let stripped = after_eq.strip_prefix('\'')?;
         let end = stripped.find('\'')?;
         &stripped[..end]
-    } else {
-        return None;
     };
 
     // viewBox="minX minY width height"

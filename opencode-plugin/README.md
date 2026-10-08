@@ -7,6 +7,9 @@
 
 ## Prerequisites
 
+Supports OpenCode V2 (validated on 2.0.22) and V1 1.18.29+. Older V1 releases
+require the previous plugin release, `@shift-preflight/opencode-plugin@0.10.2`.
+
 Install the `shift-ai` CLI:
 
 ```bash
@@ -22,10 +25,10 @@ Add the plugin to your `opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@shift-preflight/opencode-plugin"],
-  "provider": {
+  "plugins": ["@shift-preflight/opencode-plugin"],
+  "providers": {
     "anthropic": {
-      "options": {
+      "settings": {
         "baseURL": "http://localhost:8787/v1"
       }
     }
@@ -33,20 +36,26 @@ Add the plugin to your `opencode.json`:
 }
 ```
 
-OpenCode auto-installs npm plugins at startup via Bun. No `npm install` needed.
+OpenCode installs npm plugins automatically. No `npm install` needed. For V1,
+use `plugin`, `provider`, and `options` instead of `plugins`, `providers`, and
+`settings`. V2 also accepts these V1 configuration keys.
 
 ## How it works
 
-On every OpenCode launch:
+When OpenCode loads the plugin for a location:
 
 1. **Checks prerequisites** — verifies `shift-ai` is on PATH. Silently skips if not installed.
 2. **Probes port 8787** — if the SHIFT proxy is already running (from a previous session or another agent), skips startup. Verifies the proxy identity to avoid trusting unrelated services on the same port. Fully idempotent.
-3. **Starts the proxy** — spawns the proxy as a detached background process with a sanitized environment (API keys are not passed to the child process).
+3. **Starts the proxy** — calls `shift-ai proxy ensure --quiet`; the CLI manages the shared native proxy daemon.
 4. **Verifies startup** — waits briefly to confirm the proxy is healthy. Logs a warning with bypass instructions if it fails.
 
-Startup verification adds ~6 seconds on first launch; subsequent launches detect the running proxy instantly.
+Both entrypoints use Node's process API with a two-second CLI version deadline
+and a fifteen-second lifecycle-command deadline. Timed-out commands are killed.
+The proxy outlives the plugin, so unloading a location does not stop other agents' traffic.
 
-The `provider.anthropic.options.baseURL` config routes all Anthropic requests through the proxy. Note: OpenCode's Anthropic client appends only `/messages` (not `/v1/messages`) to the base URL, which is why `/v1` must be included in the `baseURL`. The proxy optimizes images, then forwards to the real Anthropic API. Auth headers and SSE streams pass through unchanged.
+The `providers.anthropic.settings.baseURL` config routes Anthropic requests through
+the proxy. Include `/v1` in the base URL. The proxy optimizes images, then forwards
+to the Anthropic API. Auth headers and SSE streams pass through unchanged.
 
 ## Sharing with other agents
 
@@ -71,7 +80,7 @@ Once OpenCode starts the proxy, other agents piggyback on it — no need to star
 The default mode is `balanced`. To change it, start the proxy manually before OpenCode:
 
 ```bash
-npx @shift-preflight/runtime proxy --port 8787 --mode economy
+shift-ai proxy start --port 8787 --mode economy
 ```
 
 | Mode | Behavior |
@@ -101,13 +110,16 @@ shift-ai gain --format json  # Machine-readable
 
 ## Upgrading
 
-OpenCode caches npm plugins at `~/.cache/opencode/packages/` and does not automatically check for newer versions. Running `shift-ai setup` will detect and clear stale caches automatically.
+Running `shift-ai setup` detects older cached `@latest` copies in both OpenCode
+layouts: V1's `~/.cache/opencode/packages/` and V2's timestamped generations under
+`~/.cache/opencode/npm/`. It respects `XDG_CACHE_HOME` and keeps current, newer,
+and explicitly pinned versions.
 
 To force an upgrade manually:
 
 ```bash
-# Remove the cached plugin and let OpenCode re-install on next launch
-rm -rf ~/.cache/opencode/packages/@shift-preflight*
+# V2: remove only this plugin's @latest cache, then restart OpenCode
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/opencode/npm/@shift-preflight/opencode-plugin@latest"
 ```
 
 Then restart OpenCode — it will fetch the latest version from npm.
@@ -116,24 +128,28 @@ Then restart OpenCode — it will fetch the latest version from npm.
 
 When the plugin starts, it probes the running proxy and compares versions:
 
-| Running proxy | Plugin version | Action |
+| Running proxy vs. plugin version | Installed CLI | Action |
 |---------------|---------------|--------|
 | Same version | — | Skip (already running) |
 | Newer version | — | Skip (don't downgrade) |
-| Older version | — | Stop old proxy, start new one |
-| No version reported | — | Treat as stale, restart |
+| Older version | Installed CLI meets plugin version | Stop old proxy, start installed CLI's proxy |
+| Older version | Installed CLI too old or version unknown | Keep healthy proxy; warn to upgrade `shift-ai` |
+| No version reported | Installed CLI meets plugin version | Treat as stale, restart |
+| No version reported | Installed CLI too old or version unknown | Keep healthy proxy; warn to upgrade `shift-ai` |
 | Not running | — | Start proxy |
 
-This means multiple OpenCode sessions with different plugin versions can coexist safely — the newest proxy always wins.
+The plugin never downgrades a healthy newer proxy. Upgrade the `shift-ai` CLI
+alongside the plugin: `proxy ensure` starts the installed binary, so a newer
+plugin alone cannot upgrade an older daemon.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---------|-----|
-| Plugin not loading | Verify `"plugin": ["@shift-preflight/opencode-plugin"]` is in your `opencode.json` |
+| Plugin not loading | Verify `"plugins": ["@shift-preflight/opencode-plugin"]` is in your V2 `opencode.json`; V1 uses `plugin` |
 | Proxy not starting | Check that `shift-ai` is installed: `which shift-ai` |
-| Requests failing | Ensure `provider.anthropic.options.baseURL` is set to `http://localhost:8787/v1` and the proxy is running |
-| Plugin not updating | OpenCode caches plugins and doesn't auto-update. Run `shift-ai setup` to detect and clear stale caches, or manually: `rm -rf ~/.cache/opencode/packages/@shift-preflight*` |
+| Requests failing | Ensure `providers.anthropic.settings.baseURL` is set to `http://localhost:8787/v1` and the proxy is running |
+| Plugin not updating | Run an updated `shift-ai setup` to clear stale `@latest` copies, or use the cache command above |
 | Port 8787 in use | Another process is using the port. Check with `lsof -i :8787` |
 | "Unknown route" error | Your `baseURL` is likely missing the `/v1` suffix. The correct value for OpenCode is `http://localhost:8787/v1`. OpenCode's Anthropic client appends only `/messages` to the base URL, so `/v1` must be included. |
 | Want to bypass proxy | Remove the `baseURL` from your provider config, or stop the proxy |

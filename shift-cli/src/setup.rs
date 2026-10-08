@@ -206,19 +206,43 @@ fn configure_claude_code(port: u16) -> Result<bool> {
 /// Returns `Ok(true)` if configuration was written, `Ok(false)` if the
 /// config file does not exist.
 fn configure_opencode_at(config_path: &Path, port: u16) -> Result<bool> {
+    use std::io::Write;
+
     if !config_path.exists() {
         return Ok(false);
     }
 
-    let content = fs::read_to_string(config_path)?;
-    let mut config: serde_json::Value =
-        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}));
+    // Replace the target atomically while preserving user-managed config symlinks.
+    let config_path = fs::canonicalize(config_path)?;
+    let permissions = fs::metadata(&config_path)?.permissions();
+    let content = fs::read_to_string(&config_path)?;
+    let mut config: serde_json::Value = serde_json::from_str(&content)
+        .context("cannot parse opencode.json; configuration left unchanged")?;
 
-    // Set provider.anthropic.options.baseURL
+    // Respect native V2 keys when present; supported V1 config stays in V1 form.
+    let provider_key = if config["providers"].get("anthropic").is_some() {
+        "providers"
+    } else if config["provider"].get("anthropic").is_some() {
+        "provider"
+    } else if config.get("providers").is_some() {
+        "providers"
+    } else {
+        "provider"
+    };
+    let options_key = if provider_key == "providers" {
+        "settings"
+    } else {
+        "options"
+    };
+    let plugin_key = if config.get("plugins").is_some() {
+        "plugins"
+    } else {
+        "plugin"
+    };
     let provider = config
         .as_object_mut()
         .context("config is not an object")?
-        .entry("provider")
+        .entry(provider_key)
         .or_insert_with(|| serde_json::json!({}));
     let anthropic = provider
         .as_object_mut()
@@ -228,7 +252,7 @@ fn configure_opencode_at(config_path: &Path, port: u16) -> Result<bool> {
     let options = anthropic
         .as_object_mut()
         .context("anthropic is not an object")?
-        .entry("options")
+        .entry(options_key)
         .or_insert_with(|| serde_json::json!({}));
 
     if let Some(opts) = options.as_object_mut() {
@@ -243,17 +267,28 @@ fn configure_opencode_at(config_path: &Path, port: u16) -> Result<bool> {
     let plugins = config
         .as_object_mut()
         .unwrap()
-        .entry("plugin")
+        .entry(plugin_key)
         .or_insert_with(|| serde_json::json!([]));
     if let Some(arr) = plugins.as_array_mut() {
         let plugin_name = "@shift-preflight/opencode-plugin";
-        if !arr.iter().any(|v| v.as_str() == Some(plugin_name)) {
+        if !arr.iter().any(|v| {
+            v.as_str() == Some(plugin_name)
+                || v.get("package").and_then(|p| p.as_str()) == Some(plugin_name)
+        }) {
             arr.push(serde_json::Value::String(plugin_name.to_string()));
         }
     }
 
     let output = serde_json::to_string_pretty(&config)?;
-    fs::write(config_path, output)?;
+    let mut replacement = tempfile::Builder::new()
+        .prefix(".opencode-")
+        .tempfile_in(config_path.parent().context("config path has no parent")?)?;
+    replacement.write_all(output.as_bytes())?;
+    replacement.as_file().set_permissions(permissions)?;
+    replacement.as_file().sync_all()?;
+    replacement
+        .persist(&config_path)
+        .context("failed to replace opencode.json")?;
     Ok(true)
 }
 
@@ -329,11 +364,34 @@ fn is_older_semver(cached: &str, current: &str) -> bool {
 
 /// Check for a stale OpenCode plugin cache at a specific directory.
 ///
-/// If a cached `package.json` exists under `cache_dir` with a version older
-/// than the CLI's own version, the cache directory is deleted.
+/// Supports the V1 package directory and V2 timestamped generation directories.
+/// Only stale generations are deleted; current generations remain in place.
 ///
 /// Returns `Some(old_version)` if a stale cache was cleared, `None` otherwise.
 pub(crate) fn check_and_clear_stale_opencode_cache_at(cache_dir: &Path) -> Result<Option<String>> {
+    if !cache_dir.exists() || !fs::symlink_metadata(cache_dir)?.is_dir() {
+        return Ok(None);
+    }
+    if cache_dir.join("node_modules").exists() {
+        return clear_stale_opencode_generation(cache_dir);
+    }
+    let mut cleared = None;
+    for entry in fs::read_dir(cache_dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if !entry.file_type()?.is_dir()
+            || !name.to_string_lossy().bytes().all(|b| b.is_ascii_digit())
+        {
+            continue;
+        }
+        if let Some(version) = clear_stale_opencode_generation(&entry.path())? {
+            cleared.get_or_insert(version);
+        }
+    }
+    Ok(cleared)
+}
+
+fn clear_stale_opencode_generation(cache_dir: &Path) -> Result<Option<String>> {
     let pkg_json = cache_dir.join("node_modules/@shift-preflight/opencode-plugin/package.json");
 
     if !pkg_json.exists() {
@@ -369,13 +427,24 @@ pub(crate) fn check_and_clear_stale_opencode_cache_at(cache_dir: &Path) -> Resul
 ///
 /// Returns `Some(old_version)` if a stale cache was cleared, `None` otherwise.
 pub(crate) fn check_and_clear_stale_opencode_cache() -> Result<Option<String>> {
-    let home = match std::env::var("HOME") {
-        Ok(h) => h,
-        Err(_) => return Ok(None),
+    let cache_root = match std::env::var_os("XDG_CACHE_HOME").filter(|v| !v.is_empty()) {
+        Some(path) => PathBuf::from(path),
+        None => match std::env::var_os("HOME") {
+            Some(home) => PathBuf::from(home).join(".cache"),
+            None => return Ok(None),
+        },
     };
-    let cache_dir = PathBuf::from(&home)
-        .join(".cache/opencode/packages/@shift-preflight/opencode-plugin@latest");
-    check_and_clear_stale_opencode_cache_at(&cache_dir)
+    let mut cleared = None;
+    for layout in ["packages", "npm"] {
+        let cache_dir = cache_root
+            .join("opencode")
+            .join(layout)
+            .join("@shift-preflight/opencode-plugin@latest");
+        if let Some(version) = check_and_clear_stale_opencode_cache_at(&cache_dir)? {
+            cleared.get_or_insert(version);
+        }
+    }
+    Ok(cleared)
 }
 
 // ── Interactive setup ────────────────────────────────────────────────
@@ -581,6 +650,52 @@ mod tests {
     }
 
     #[test]
+    fn test_check_stale_cache_v2_generations() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp
+            .path()
+            .join("npm/@shift-preflight/opencode-plugin@latest");
+        let stale = cache.join("1790261017722");
+        let stale2 = cache.join("1790261017723");
+        let current = cache.join("1790261017724");
+        let unrelated = cache.join("unrelated");
+        let pinned = tmp
+            .path()
+            .join("npm/@shift-preflight/opencode-plugin@0.0.1/1790261017722");
+        make_fake_cache(&stale, "0.0.1");
+        make_fake_cache(&stale2, "0.0.1");
+        make_fake_cache(&current, env!("CARGO_PKG_VERSION"));
+        make_fake_cache(&unrelated, "0.0.1");
+        make_fake_cache(&pinned, "0.0.1");
+
+        assert_eq!(
+            check_and_clear_stale_opencode_cache_at(&cache).unwrap(),
+            Some("0.0.1".into())
+        );
+        assert!(!stale.exists());
+        assert!(!stale2.exists());
+        assert!(current.exists());
+        assert!(unrelated.exists());
+        assert!(pinned.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_check_stale_cache_skips_symlinked_generations() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp.path().join("cache");
+        let outside = tmp.path().join("outside");
+        fs::create_dir_all(&cache).unwrap();
+        make_fake_cache(&outside, "0.0.1");
+        std::os::unix::fs::symlink(&outside, cache.join("1790261017722")).unwrap();
+        assert_eq!(
+            check_and_clear_stale_opencode_cache_at(&cache).unwrap(),
+            None
+        );
+        assert!(outside.exists());
+    }
+
+    #[test]
     fn test_check_stale_cache_detects_old_version() {
         let tmp = tempfile::tempdir().unwrap();
         // Take ownership so TempDir::drop won't try to delete after remove_dir_all
@@ -621,6 +736,118 @@ mod tests {
 
         let result = check_and_clear_stale_opencode_cache_at(&cache_dir).unwrap();
         assert_eq!(result, None);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_configure_opencode_failed_replacement_preserves_file() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root can write through directory permissions; this probe needs a normal user.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("opencode.json");
+        let original = "{\"plugins\":[\"preserve-me\"]}";
+        fs::write(&path, original).unwrap();
+        fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o500)).unwrap();
+        let result = configure_opencode_at(&path, 8787);
+        fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_configure_opencode_preserves_symlink_and_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("real-config.json");
+        let link = tmp.path().join("opencode.json");
+        fs::write(&target, "{}").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        configure_opencode_at(&link, 8787).unwrap();
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(target).unwrap()).unwrap();
+        assert_eq!(
+            config["provider"]["anthropic"]["options"]["baseURL"],
+            "http://localhost:8787/v1"
+        );
+    }
+
+    #[test]
+    fn test_configure_opencode_preserves_legacy_anthropic_with_other_native_providers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("opencode.json");
+        let initial = serde_json::json!({
+            "providers": {"openai": {}},
+            "provider": {"anthropic": {
+                "name": "My Claude",
+                "options": {"timeout": 120000, "headers": {"x-review": "preserve"}},
+                "models": {"custom-claude": {"name": "Custom Claude", "id": "claude-sonnet-4-5"}}
+            }}
+        });
+        fs::write(&path, initial.to_string()).unwrap();
+        configure_opencode_at(&path, 8787).unwrap();
+        let config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert!(config["providers"].get("anthropic").is_none());
+        let mut expected = initial["provider"]["anthropic"].clone();
+        expected["options"]["baseURL"] = "http://localhost:8787/v1".into();
+        assert_eq!(config["provider"]["anthropic"], expected);
+        assert_eq!(config["providers"], initial["providers"]);
+    }
+
+    #[test]
+    fn test_configure_opencode_parse_error_preserves_file() {
+        for original in [
+            "{\"plugins\": [\"my-plugin\"], // keep this comment\n}",
+            "{\"providers\": {\"anthropic\": ",
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let path = tmp.path().join("opencode.json");
+            fs::write(&path, original).unwrap();
+
+            assert!(configure_opencode_at(&path, 8787).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        }
+    }
+
+    #[test]
+    fn test_configure_opencode_preserves_native_v2_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("opencode.json");
+        let initial = serde_json::json!({
+            "plugins": [{"package": "another-plugin", "options": {"enabled": true}}],
+            "providers": {"anthropic": {"settings": {"timeout": 120000}}}
+        });
+        fs::write(&path, initial.to_string()).unwrap();
+        configure_opencode_at(&path, 8787).unwrap();
+        configure_opencode_at(&path, 8787).unwrap();
+        let config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(
+            config["providers"]["anthropic"]["settings"]["baseURL"],
+            "http://localhost:8787/v1"
+        );
+        assert_eq!(
+            config["providers"]["anthropic"]["settings"]["timeout"],
+            120000
+        );
+        assert_eq!(config["plugins"][0], initial["plugins"][0]);
+        assert_eq!(config["plugins"].as_array().unwrap().len(), 2);
+        assert_eq!(config["plugins"][1], "@shift-preflight/opencode-plugin");
+        assert!(config.get("plugin").is_none());
+        assert!(config.get("provider").is_none());
     }
 
     #[test]
