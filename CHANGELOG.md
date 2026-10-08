@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/alohaninja/shift/compare/v0.10.2...v0.10.3) (2026-10-08)
+
+
+### Bug Fixes
+
+* **opencode-plugin:** support OpenCode V2 ([#67](https://github.com/alohaninja/shift/issues/67)) ([b08f157](https://github.com/alohaninja/shift/commit/b08f157d7da865093332c836c65b88faf3cfcee9))
+
 ## [0.10.2](https://github.com/alohaninja/shift/compare/v0.10.1...v0.10.2) (2026-06-12)
 
 
