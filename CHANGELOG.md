@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.4](https://github.com/alohaninja/shift/compare/v0.10.3...v0.10.4) (2026-10-09)
+
+
+### Bug Fixes
+
+* **proxy:** verify daemon identity before signaling ([#69](https://github.com/alohaninja/shift/issues/69)) ([447d73b](https://github.com/alohaninja/shift/commit/447d73b8d10e480397a58c1ece10c88161b5841c))
+
 ## [0.10.3](https://github.com/alohaninja/shift/compare/v0.10.2...v0.10.3) (2026-10-08)
 
 
