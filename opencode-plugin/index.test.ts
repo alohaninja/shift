@@ -292,6 +292,23 @@ describe("ShiftProxyPlugin", () => {
   // Path 3: proxy running at stale version → stop then ensure
   // -------------------------------------------------------------------------
   describe("when proxy is running at a stale version", () => {
+    it("surfaces migration errors without claiming an old daemon was restarted", async () => {
+      globalThis.fetch = mock(async () => jsonResponse(SHIFT_HEALTH_RESPONSE_STALE)) as any;
+      const calls: string[] = [];
+      const { ShiftProxyPlugin } = await import("./index");
+      await ShiftProxyPlugin(createPluginInput(async (command) => {
+        calls.push(command);
+        if (command.includes("proxy stop")) {
+          throw new Error("legacy PID-only proxy state cannot prove ownership; no signal sent. Stop the old daemon after verifying its identity, then remove proxy.pid");
+        }
+        return `shift-ai ${PACKAGE_VERSION}\n`;
+      }));
+      expect(calls.some((c) => c.includes("proxy ensure"))).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("legacy PID-only"));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("automatic restart did not complete"));
+      expect(logSpy.mock.calls.some((call) => String(call[0]).includes("started on port"))).toBe(false);
+    });
+
     it("logs version mismatch and restarts the proxy", async () => {
       let fetchCallCount = 0;
       const fetchMock = mock(() => {

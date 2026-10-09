@@ -127,6 +127,7 @@ async fn health_returns_ok_with_service_identity() {
 
     assert_eq!(json["status"], "ok");
     assert_eq!(json["service"], "@shift-preflight/runtime proxy");
+    assert_eq!(json["pid"], std::process::id());
     assert!(json["version"].is_string());
     assert!(!json["version"].as_str().unwrap().is_empty());
 }

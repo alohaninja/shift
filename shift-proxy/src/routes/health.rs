@@ -7,7 +7,7 @@ use serde_json::json;
 
 /// GET /health — proxy health check.
 ///
-/// Returns a JSON object with service identity and version.
+/// Returns service identity, version, and the PID that owns this listener.
 /// The service string MUST match `HEALTH_SERVICE_ID` checked by
 /// the OpenCode plugin and `shift-ai proxy status`.
 pub async fn health_handler() -> Json<serde_json::Value> {
@@ -15,6 +15,7 @@ pub async fn health_handler() -> Json<serde_json::Value> {
         "status": "ok",
         "service": "@shift-preflight/runtime proxy",
         "version": env!("CARGO_PKG_VERSION"),
+        "pid": std::process::id(),
     }))
 }
 
